@@ -94,13 +94,46 @@ export default function Home() {
   const loadTrades = useCallback(async () => {
     try {
       const res = await fetch("/api/trades");
-      const data = await res.json();
-      if (data.trades) {
-        setActiveTrades(data.activeTrades || []);
-        setPendingTrades(data.pendingTrades || []);
-        setClosedTrades(data.closedTrades || []);
-        if (data.metrics) setMetrics(data.metrics);
+      let serverTrades: any[] = [];
+      try {
+        const text = await res.text();
+        const data = text ? JSON.parse(text) : null;
+        if (data?.trades) serverTrades = data.trades;
+      } catch (e) {
+        serverTrades = [];
       }
+
+      // Merge with locally persisted positions
+      const localTrades: any[] = JSON.parse(localStorage.getItem("senior_broker_custom_positions") || "[]");
+      const combinedMap = new Map<string, any>();
+      serverTrades.forEach((t) => combinedMap.set(t.ticker.toUpperCase(), t));
+      localTrades.forEach((t) => {
+        if (!combinedMap.has(t.ticker.toUpperCase())) {
+          combinedMap.set(t.ticker.toUpperCase(), t);
+        }
+      });
+
+      const allTrades = Array.from(combinedMap.values());
+      const active = allTrades.filter((t) => t.status === "ACTIVE" || t.status === "SCALED_T1");
+      const pending = allTrades.filter((t) => t.status === "PENDING_ENTRY");
+      const closed = allTrades.filter((t) => t.status === "CLOSED");
+
+      setActiveTrades(active);
+      setPendingTrades(pending);
+      setClosedTrades(closed);
+
+      const totalRealized = closed.reduce((acc, t) => acc + (t.realizedPnL || 0), 0);
+      const winCount = closed.filter((t) => (t.realizedPnL || 0) > 0).length;
+      const winRateVal = closed.length > 0 ? (winCount / closed.length) * 100 : 0;
+      const avgR = closed.length > 0 ? closed.reduce((acc, t) => acc + (t.rMultiple || 0), 0) / closed.length : 0;
+
+      setMetrics({
+        totalRealizedPnL: Number(totalRealized.toFixed(2)),
+        winRate: Number(winRateVal.toFixed(1)),
+        totalTrades: closed.length,
+        avgRMultiple: Number(avgR.toFixed(2)),
+        openPositionCount: active.length,
+      });
     } catch (err) {
       console.error("Error loading trades:", err);
     }

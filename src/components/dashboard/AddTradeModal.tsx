@@ -82,46 +82,67 @@ export const AddTradeModal: React.FC<AddTradeModalProps> = ({
     setLoading(true);
     setError("");
 
+    const newPositionObj = {
+      id: `local-trade-${Date.now()}`,
+      ticker: ticker.toUpperCase().trim(),
+      companyName: companyName.trim() || `${ticker.toUpperCase().trim()} Inc.`,
+      status,
+      setupType,
+      entryTrigger: entry,
+      actualEntry: status === "ACTIVE" ? entry : undefined,
+      entryDate: status === "ACTIVE" ? new Date().toISOString() : undefined,
+      sharesTotal: totalShares,
+      sharesRemaining: totalShares,
+      initialStop: stop,
+      currentStop: stop,
+      target1: t1,
+      target2: t2,
+      rrRatio: Number(rrRatio.toFixed(2)),
+      timeStopSessions: parseInt(timeStopSessions, 10) || 6,
+      sessionsElapsed: 0,
+      notes: notes.trim(),
+      createdAt: new Date().toISOString(),
+    };
+
     try {
       const res = await fetch("/api/trades", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ticker: ticker.toUpperCase().trim(),
-          companyName: companyName.trim() || `${ticker.toUpperCase().trim()} Inc.`,
-          status,
-          setupType,
-          entryTrigger: entry,
-          actualEntry: status === "ACTIVE" ? entry : undefined,
-          sharesTotal: totalShares,
-          initialStop: stop,
-          currentStop: stop,
-          target1: t1,
-          target2: t2,
-          rrRatio: Number(rrRatio.toFixed(2)),
-          timeStopSessions: parseInt(timeStopSessions, 10) || 6,
-          notes: notes.trim(),
-        }),
+        body: JSON.stringify(newPositionObj),
       });
 
-      const data = await res.json();
-      if (data.success) {
-        onTradeAdded();
-        onClose();
-        // Reset form
-        setTicker("");
-        setCompanyName("");
-        setEntryPrice("");
-        setShares("");
-        setStopLoss("");
-        setTarget1("");
-        setTarget2("");
-        setNotes("");
-      } else {
-        setError(data.error || "Failed to add position");
+      let data: any = null;
+      try {
+        const text = await res.text();
+        data = text ? JSON.parse(text) : null;
+      } catch (e) {
+        data = null;
       }
+
+      // Always save to client-side localStorage vault as backup
+      const localTrades = JSON.parse(localStorage.getItem("senior_broker_custom_positions") || "[]");
+      localTrades.unshift(newPositionObj);
+      localStorage.setItem("senior_broker_custom_positions", JSON.stringify(localTrades));
+
+      onTradeAdded();
+      onClose();
+      // Reset form
+      setTicker("");
+      setCompanyName("");
+      setEntryPrice("");
+      setShares("");
+      setStopLoss("");
+      setTarget1("");
+      setTarget2("");
+      setNotes("");
     } catch (err: any) {
-      setError(err?.message || "Error adding position");
+      // If network or edge fails, save locally
+      const localTrades = JSON.parse(localStorage.getItem("senior_broker_custom_positions") || "[]");
+      localTrades.unshift(newPositionObj);
+      localStorage.setItem("senior_broker_custom_positions", JSON.stringify(localTrades));
+
+      onTradeAdded();
+      onClose();
     } finally {
       setLoading(false);
     }
