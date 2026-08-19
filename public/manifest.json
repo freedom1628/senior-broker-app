@@ -1,0 +1,21 @@
+{
+  "name": "Senior Broker Swing Trading",
+  "short_name": "SeniorBroker",
+  "description": "Multi-AI Swing Trading Desk with Real-Time Risk & Notification Engine",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#070A0F",
+  "theme_color": "#070A0F",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

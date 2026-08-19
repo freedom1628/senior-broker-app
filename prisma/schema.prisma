@@ -1,0 +1,122 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id            String          @id @default(cuid())
+  email         String          @unique
+  name          String?
+  image         String?
+  accountSize   Float           @default(10000.0)
+  riskPerTrade  Float           @default(1.0)
+  geminiKey     String?
+  anthropicKey  String?
+  openaiKey     String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  researchRuns  ResearchRun[]
+  trades        Trade[]
+  notifications AlertNotification[]
+}
+
+model ResearchRun {
+  id               String           @id @default(cuid())
+  userId           String
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date             DateTime         @default(now())
+  marketRegime     String           // "FAVORABLE", "NEUTRAL", "HOSTILE"
+  regimeNotes      String
+  macroFlags       String?
+  geminiReport     String?
+  claudeReport     String?
+  chatgptReport    String?
+  arbiterSynthesis String?
+  candidates       CandidateSetup[]
+  createdAt        DateTime         @default(now())
+}
+
+model CandidateSetup {
+  id              String       @id @default(cuid())
+  researchRunId   String
+  researchRun     ResearchRun  @relation(fields: [researchRunId], references: [id], onDelete: Cascade)
+  ticker          String
+  companyName     String
+  setupType       String       // "Catalyst Continuation", "Breakout Base", "Post-Earnings Pullback", etc.
+  entryTrigger    Float
+  entryCondition  String
+  stopLoss        Float
+  stopRationale   String
+  target1         Float
+  target2         Float
+  rrRatio         Float
+  timeStopDays    Int          @default(6)
+  positionShares  Int
+  riskAmount      Float
+  catalystDate    String
+  catalystSummary String
+  bearCase        String
+  score           Float
+  modelSources    String       // "Gemini,Claude,ChatGPT" or individual
+  status          String       @default("WATCHLIST") // "WATCHLIST", "PROMOTED", "DISMISSED"
+  createdAt       DateTime     @default(now())
+}
+
+model Trade {
+  id                String       @id @default(cuid())
+  userId            String
+  user              User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ticker            String
+  companyName       String
+  status            String       @default("PENDING_ENTRY") // "PENDING_ENTRY", "ACTIVE", "SCALED_T1", "CLOSED"
+  setupType         String
+  entryTrigger      Float
+  entryCondition    String?
+  actualEntry       Float?
+  entryDate         DateTime?
+  sharesTotal       Int
+  sharesRemaining   Int
+  initialStop       Float
+  currentStop       Float
+  target1           Float
+  target2           Float
+  rrRatio           Float
+  timeStopSessions  Int          @default(6)
+  sessionsElapsed   Int          @default(0)
+  closedPrice       Float?
+  closedDate        DateTime?
+  realizedPnL       Float?
+  rMultiple         Float?
+  exitReason        String?      // "STOP_HIT", "T1_REACHED", "T2_REACHED", "TIME_STOP", "MANUAL"
+  notes             String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+}
+
+model MarketQuote {
+  ticker      String   @id
+  name        String?
+  price       Float
+  change      Float
+  changePct   Float
+  high        Float?
+  low         Float?
+  volume      Float?
+  prevClose   Float?
+  updatedAt   DateTime @default(now())
+}
+
+model AlertNotification {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ticker      String
+  type        String   // "ENTRY_TRIGGERED", "STOP_ALERT", "TARGET_1_HIT", "TARGET_2_HIT", "TIME_STOP_WARNING"
+  title       String
+  message     String
+  isRead      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+}
