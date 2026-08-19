@@ -1,13 +1,17 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "senior-broker-app",
+  "main": ".open-next/worker.js",
   "compatibility_date": "2026-08-01",
   "compatibility_flags": [
     "nodejs_compat"
   ],
-  "pages_build_output_dir": ".open-next/assets",
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
   "vars": {
     "NODE_ENV": "production",
-    "NEXTAUTH_URL": "https://senior-broker.pages.dev"
+    "NEXTAUTH_URL": "https://senior-broker-app.workers.dev"
   }
 }
