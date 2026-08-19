@@ -3,55 +3,65 @@ import GoogleProvider from "next-auth/providers/google";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { prisma } from "@/lib/prisma";
 
-export const authOptions: NextAuthOptions = {
-  providers: [
-    GoogleProvider({
-      clientId: process.env.GOOGLE_CLIENT_ID || "mock-google-client-id",
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET || "mock-google-client-secret",
-    }),
-    CredentialsProvider({
-      id: "demo-user",
-      name: "Demo Account",
-      credentials: {
-        email: { label: "Email", type: "email", placeholder: "trader@broker.com" },
-      },
-      async authorize(credentials) {
-        const email = credentials?.email || "trader@broker.com";
-        let user = await prisma.user.findUnique({
-          where: { email },
-        });
+const hasGoogleAuth = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_CLIENT_ID !== "mock-google-client-id");
 
-        if (!user) {
-          user = await prisma.user.create({
-            data: {
-              email,
-              name: "Senior Trader",
-              accountSize: 10000.0,
-              riskPerTrade: 1.0,
-            },
-          });
-        }
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          image: user.image,
-        };
-      },
-    }),
-  ],
+const providers: any[] = [
+  CredentialsProvider({
+    id: "credentials",
+    name: "Desk Account",
+    credentials: {
+      email: { label: "Email", type: "email", placeholder: "trader@broker.com" },
+      name: { label: "Name", type: "text" },
+    },
+    async authorize(credentials) {
+      const email = credentials?.email ? credentials.email.toLowerCase().trim() : "trader@broker.com";
+      const name = credentials?.name || "Senior Trader";
+
+      let user = await prisma.user.findFirst({
+        where: { email },
+      });
+
+      if (!user) {
+        user = await prisma.user.create({
+          data: {
+            email,
+            name,
+            accountSize: 10000.0,
+            riskPerTrade: 1.0,
+          },
+        });
+      }
+      return {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+      };
+    },
+  }),
+];
+
+if (hasGoogleAuth) {
+  providers.push(
+    GoogleProvider({
+      clientId: process.env.GOOGLE_CLIENT_ID!,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+    })
+  );
+}
+
+export const authOptions: NextAuthOptions = {
+  providers,
   callbacks: {
     async session({ session, token }) {
       if (session.user && token.sub) {
-        let dbUser = await prisma.user.findUnique({
-          where: { email: session.user.email || "" },
+        let dbUser = await prisma.user.findFirst({
+          where: { email: session.user.email || "trader@broker.com" },
         });
         if (!dbUser && session.user.email) {
           dbUser = await prisma.user.create({
             data: {
               email: session.user.email,
               name: session.user.name || "Senior Trader",
-              image: session.user.image,
               accountSize: 10000.0,
               riskPerTrade: 1.0,
             },
