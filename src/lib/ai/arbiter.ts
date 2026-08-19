@@ -1,32 +1,73 @@
-import { ParsedReport, ParsedCandidate } from "./parser";
+// src/lib/ai/arbiter.ts
+// Multi-Model Consensus Arbiter Engine
+// Harmonizes market regimes, cross-model deduplication, +5.0 conviction bonuses, 1% risk sizing, and price ladders
 
-export interface MasterSetup extends ParsedCandidate {
-  consensusCount: number;
-  modelsAgreed: string[];
-  isConsensusPick: boolean;
-  normalizedShares: number;
-  normalizedRisk: number;
+import { ParsedReport, ParsedCandidate, MasterSetup, MasterArbiterPlan, MarketRegimeType, PriceLadderTier } from "./types";
+
+export type { MasterSetup, MasterArbiterPlan, PriceLadderTier };
+
+/**
+ * Calculates a 4-tier visual execution price ladder for any trade setup.
+ */
+export function generate4TierPriceLadder(
+  entry: number,
+  stop: number,
+  target1: number,
+  target2: number
+): PriceLadderTier[] {
+  const riskPerShare = Math.max(0.01, Math.abs(entry - stop));
+
+  const t2Dist = Number((((target2 - entry) / entry) * 100).toFixed(2));
+  const t1Dist = Number((((target1 - entry) / entry) * 100).toFixed(2));
+  const stopDist = Number((((stop - entry) / entry) * 100).toFixed(2));
+
+  const t2R = Number(((target2 - entry) / riskPerShare).toFixed(2));
+  const t1R = Number(((target1 - entry) / riskPerShare).toFixed(2));
+
+  return [
+    {
+      levelName: "TARGET_2",
+      price: target2,
+      distancePct: t2Dist,
+      rMultiple: t2R,
+      label: `Target 2 (Runner +${t2R}R)`,
+      actionLabel: "Sell Remaining 50%",
+    },
+    {
+      levelName: "TARGET_1",
+      price: target1,
+      distancePct: t1Dist,
+      rMultiple: t1R,
+      label: `Target 1 (Scale 50% +${t1R}R)`,
+      actionLabel: "Scale 50% & Ratchet B/E",
+    },
+    {
+      levelName: "ENTRY",
+      price: entry,
+      distancePct: 0.0,
+      rMultiple: 0.0,
+      label: `Entry Trigger ($${entry.toFixed(2)})`,
+      actionLabel: "Execution Pivot",
+    },
+    {
+      levelName: "STOP_LOSS",
+      price: stop,
+      distancePct: stopDist,
+      rMultiple: -1.0,
+      label: `Hard Stop Loss (-1.0R)`,
+      actionLabel: "Invalidation Cut",
+    },
+  ];
 }
 
-export interface MasterArbiterPlan {
-  marketRegime: "FAVORABLE" | "NEUTRAL" | "HOSTILE";
-  regimeNotes: string;
-  macroFlags: string;
-  consensusHighlight: string;
-  masterSetups: MasterSetup[];
-  allCandidates: ParsedCandidate[];
-  modelBreakdowns: {
-    gemini?: ParsedReport;
-    claude?: ParsedReport;
-    chatgpt?: ParsedReport;
-  };
-}
-
+/**
+ * Synthesizes multiple independent model reports into a unified Master Arbiter Plan.
+ */
 export function synthesizeArbiterPlan(
   geminiReport?: ParsedReport,
   claudeReport?: ParsedReport,
   chatgptReport?: ParsedReport,
-  accountSize: number = 10000.0,
+  accountSize: number = 15000.0,
   riskPercent: number = 1.0
 ): MasterArbiterPlan {
   const allParsed: ParsedCandidate[] = [];
@@ -42,27 +83,31 @@ export function synthesizeArbiterPlan(
     });
   });
 
-  // Calculate Desk Regime Consensus
+  // 1. Calculate Desk Regime Consensus (Risk-averse bias)
   let favorableCount = 0;
   let neutralCount = 0;
   let hostileCount = 0;
 
   reports.forEach(r => {
-    if (r.report.marketRegime === "FAVORABLE") favorableCount++;
+    if (r.report.marketRegime === "HOSTILE") hostileCount++;
     else if (r.report.marketRegime === "NEUTRAL") neutralCount++;
-    else if (r.report.marketRegime === "HOSTILE") hostileCount++;
+    else if (r.report.marketRegime === "FAVORABLE") favorableCount++;
   });
 
-  let finalRegime: "FAVORABLE" | "NEUTRAL" | "HOSTILE" = "FAVORABLE";
-  if (hostileCount >= 2) finalRegime = "HOSTILE";
-  else if (neutralCount >= 2) finalRegime = "NEUTRAL";
-  else if (favorableCount >= 1) finalRegime = "FAVORABLE";
+  let finalRegime: MarketRegimeType = "FAVORABLE";
+  if (hostileCount >= 2) {
+    finalRegime = "HOSTILE";
+  } else if (neutralCount >= 2 || (hostileCount === 1 && neutralCount >= 1)) {
+    finalRegime = "NEUTRAL";
+  } else if (favorableCount >= 1) {
+    finalRegime = "FAVORABLE";
+  }
 
-  // Group tickers across models
+  // 2. Group and deduplicate tickers across models
   const tickerMap = new Map<string, { candidates: ParsedCandidate[]; models: Set<string> }>();
 
   allParsed.forEach(c => {
-    const key = c.ticker.toUpperCase();
+    const key = c.ticker.toUpperCase().trim();
     if (!tickerMap.has(key)) {
       tickerMap.set(key, { candidates: [], models: new Set() });
     }
@@ -85,16 +130,19 @@ export function synthesizeArbiterPlan(
     // Shares = floor(Risk Budget / Risk Per Share)
     const riskBudget = accountSize * (riskPercent / 100);
     const riskPerShare = Math.max(0.01, Math.abs(primary.entryTrigger - primary.stopLoss));
-    const normalizedShares = Math.max(1, Math.floor(riskBudget / riskPerShare));
+    const rawShares = Math.max(1, Math.floor(riskBudget / riskPerShare));
+    const normalizedShares = rawShares;
     const normalizedRisk = Number((normalizedShares * riskPerShare).toFixed(2));
+    const allocatedCapital = Number((normalizedShares * primary.entryTrigger).toFixed(2));
+    const actualRiskPct = Number(((normalizedRisk / accountSize) * 100).toFixed(4));
 
     // Calculate normalized R:R
     const rewardPerShare = Math.abs(primary.target1 - primary.entryTrigger);
     const normalizedRR = Number((rewardPerShare / riskPerShare).toFixed(2));
 
-    // Boost score for multi-model consensus
+    // Boost score for multi-model consensus (+5.0 bonus per additional model)
     const consensusBonus = isConsensusPick ? 5.0 * (consensusCount - 1) : 0;
-    const finalScore = Number(Math.min(99, primary.score + consensusBonus).toFixed(1));
+    const finalScore = Number(Math.min(99.0, primary.score + consensusBonus).toFixed(1));
 
     masterSetups.push({
       ...primary,
@@ -104,13 +152,15 @@ export function synthesizeArbiterPlan(
       riskAmount: normalizedRisk,
       normalizedShares,
       normalizedRisk,
+      allocatedCapital,
+      actualRiskPct,
       consensusCount,
       modelsAgreed,
       isConsensusPick,
     });
   });
 
-  // Sort: Consensus picks first, then by highest composite score
+  // 3. Sort: Consensus picks first, then by highest composite score
   masterSetups.sort((a, b) => {
     if (a.isConsensusPick && !b.isConsensusPick) return -1;
     if (!a.isConsensusPick && b.isConsensusPick) return 1;
@@ -127,6 +177,7 @@ export function synthesizeArbiterPlan(
   const macroFlags = representativeReport?.macroFlags || "CPI print cleared; monitor PPI (Thu) and FOMC minutes (Aug 19). Maintain strict 1% risk allocation.";
 
   return {
+    id: `arbiter_plan_${Date.now()}`,
     marketRegime: finalRegime,
     regimeNotes,
     macroFlags,
@@ -138,5 +189,6 @@ export function synthesizeArbiterPlan(
       claude: claudeReport,
       chatgpt: chatgptReport,
     },
+    generatedAt: new Date().toISOString(),
   };
 }

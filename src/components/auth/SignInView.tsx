@@ -1,122 +1,108 @@
 "use client";
 
 import React, { useState } from "react";
-import { TrendingUp, ShieldCheck, Lock, ArrowRight, Sparkles, Key, User, Mail, CheckCircle2 } from "lucide-react";
+import { TrendingUp, ShieldCheck, Key, User as UserIcon, Mail, Lock, Sparkles, CheckCircle2 } from "lucide-react";
+import { PinPad } from "./PinPad";
+import { GoogleOAuthModal } from "./GoogleOAuthModal";
+import { useAuth } from "@/context/AuthContext";
+import { User } from "@/types/auth";
 
 interface SignInViewProps {
-  onAuthenticated: (user: { email: string; name: string }) => void;
+  onAuthenticated?: (user: { email: string; name: string }) => void;
 }
 
 export const SignInView: React.FC<SignInViewProps> = ({ onAuthenticated }) => {
-  const [mode, setMode] = useState<"SIGN_IN" | "CREATE_ACCOUNT">("SIGN_IN");
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [passcode, setPasscode] = useState("");
-  const [confirmPasscode, setConfirmPasscode] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [successMsg, setSuccessMsg] = useState("");
+  const { loginWithPin, loginWithGoogle, registerDeskAccount, error: authError, clearError } = useAuth();
 
-  // Instant Google Sign In (Safe fallback)
-  const handleGoogleSignIn = () => {
-    setLoading(true);
-    setError("");
-    const userAccounts = JSON.parse(localStorage.getItem("senior_broker_accounts") || "{}");
-    const defaultGoogleEmail = "jonesfamily1628@gmail.com";
-    const googleUser = userAccounts[defaultGoogleEmail] || {
-      name: "Alex Jones (Google Authenticated)",
-      email: defaultGoogleEmail,
-      passcode: "google-oauth-session",
-      createdAt: new Date().toISOString(),
-    };
-    userAccounts[defaultGoogleEmail] = googleUser;
-    localStorage.setItem("senior_broker_accounts", JSON.stringify(userAccounts));
+  const [activeMode, setActiveMode] = useState<"PIN" | "REGISTER">("PIN");
+  const [isGoogleModalOpen, setIsGoogleModalOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-    setSuccessMsg("Google Identity Authenticated! Unlocking desk...");
-    setTimeout(() => {
-      onAuthenticated({
-        email: defaultGoogleEmail,
-        name: googleUser.name,
-      });
-      setLoading(false);
-    }, 600);
+  // Form fields for registration
+  const [regName, setRegName] = useState("");
+  const [regEmail, setRegEmail] = useState("");
+  const [regPin, setRegPin] = useState("");
+  const [regConfirmPin, setRegConfirmPin] = useState("");
+
+  const effectiveError = localError || authError;
+
+  // Handle PIN Login from PinPad
+  const handlePinSubmit = async (pin: string) => {
+    setIsLoading(true);
+    setLocalError(null);
+    clearError();
+
+    const res = await loginWithPin(pin);
+    setIsLoading(false);
+
+    if (res.success) {
+      if (onAuthenticated) {
+        onAuthenticated({
+          email: pin === "8888" ? "alex.jones.trader@gmail.com" : "trader@broker.com",
+          name: pin === "8888" ? "Alex Jones (Swing Desk)" : "Senior Desk Trader",
+        });
+      }
+    } else {
+      setLocalError(res.error || "Invalid PIN. Try default: 8888 or 1234");
+    }
   };
 
-  // Sign In or Create Account with Email & Passcode
-  const handlePasscodeAuth = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError("");
-    setSuccessMsg("");
+  // Handle Google OAuth Selected Account
+  const handleGoogleAccountSelected = async (account: Partial<User>) => {
+    setIsLoading(true);
+    setLocalError(null);
+    clearError();
 
-    if (!email || !email.includes("@")) {
-      setError("Please enter a valid email address.");
-      return;
-    }
+    const res = await loginWithGoogle(account);
+    setIsLoading(false);
 
-    if (!passcode || passcode.length < 4) {
-      setError("Passcode / PIN must be at least 4 characters.");
-      return;
-    }
-
-    const cleanEmail = email.toLowerCase().trim();
-
-    if (mode === "CREATE_ACCOUNT") {
-      if (passcode !== confirmPasscode) {
-        setError("Passcodes do not match.");
-        return;
-      }
-
-      setLoading(true);
-      const userAccounts = JSON.parse(localStorage.getItem("senior_broker_accounts") || "{}");
-      userAccounts[cleanEmail] = {
-        name: name.trim() || cleanEmail.split("@")[0].toUpperCase() + " Trader",
-        email: cleanEmail,
-        passcode: passcode,
-        createdAt: new Date().toISOString(),
-      };
-      localStorage.setItem("senior_broker_accounts", JSON.stringify(userAccounts));
-
-      setSuccessMsg("Desk account created successfully! Unlocking terminal...");
-      setTimeout(() => {
+    if (res.success) {
+      if (onAuthenticated) {
         onAuthenticated({
-          email: cleanEmail,
-          name: userAccounts[cleanEmail].name,
+          email: account.email || "alex.jones.trader@gmail.com",
+          name: account.name || "Alex Jones",
         });
-        setLoading(false);
-      }, 700);
-
+      }
     } else {
-      // Sign In mode
-      setLoading(true);
-      const userAccounts = JSON.parse(localStorage.getItem("senior_broker_accounts") || "{}");
-      const existingAccount = userAccounts[cleanEmail];
+      setLocalError(res.error || "Google authentication failed");
+    }
+  };
 
-      if (existingAccount) {
-        if (existingAccount.passcode !== passcode) {
-          setError("Invalid passcode for this email. Please try again.");
-          setLoading(false);
-          return;
-        }
-        onAuthenticated({
-          email: cleanEmail,
-          name: existingAccount.name,
-        });
-      } else {
-        // Auto-register first time email logins
-        userAccounts[cleanEmail] = {
-          name: cleanEmail.split("@")[0].toUpperCase() + " Trader",
-          email: cleanEmail,
-          passcode: passcode,
-          createdAt: new Date().toISOString(),
-        };
-        localStorage.setItem("senior_broker_accounts", JSON.stringify(userAccounts));
+  // Handle Account Registration
+  const handleRegisterSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLocalError(null);
+    clearError();
 
+    if (!regEmail.includes("@")) {
+      setLocalError("Please enter a valid email address.");
+      return;
+    }
+    if (regPin.length < 4) {
+      setLocalError("Passcode must be at least 4 digits.");
+      return;
+    }
+    if (regPin !== regConfirmPin) {
+      setLocalError("Passcodes do not match.");
+      return;
+    }
+
+    setIsLoading(true);
+    const res = await registerDeskAccount(regName, regEmail, regPin);
+    setIsLoading(false);
+
+    if (res.success) {
+      setSuccessMsg("Desk account registered! Unlocking terminal...");
+      if (onAuthenticated) {
         onAuthenticated({
-          email: cleanEmail,
-          name: userAccounts[cleanEmail].name,
+          email: regEmail.toLowerCase().trim(),
+          name: regName.trim() || "Senior Trader",
         });
       }
-      setLoading(false);
+    } else {
+      setLocalError(res.error || "Registration failed");
     }
   };
 
@@ -145,8 +131,9 @@ export const SignInView: React.FC<SignInViewProps> = ({ onAuthenticated }) => {
 
         {/* Google 1-Click Fast Access Button */}
         <button
-          onClick={handleGoogleSignIn}
-          disabled={loading}
+          type="button"
+          onClick={() => setIsGoogleModalOpen(true)}
+          disabled={isLoading}
           className="w-full flex items-center justify-center space-x-3 rounded-2xl bg-white py-3.5 text-xs font-semibold text-neutral-900 shadow hover:bg-neutral-100 transition active:scale-95 disabled:opacity-50"
         >
           <svg className="h-4 w-4" viewBox="0 0 24 24">
@@ -173,137 +160,168 @@ export const SignInView: React.FC<SignInViewProps> = ({ onAuthenticated }) => {
         {/* Divider */}
         <div className="flex items-center space-x-3 text-xs text-neutral-500 font-mono">
           <div className="flex-1 h-px bg-white/10" />
-          <span>OR DESK PASSCODE</span>
+          <span>OR DESK PIN / PASSCODE</span>
           <div className="flex-1 h-px bg-white/10" />
         </div>
 
-        {/* Mode Selector (Sign In vs Create Account) */}
+        {/* Mode Selector (PIN Pad vs Create Passcode) */}
         <div className="flex rounded-2xl bg-black/50 p-1 border border-white/[0.08]">
           <button
             type="button"
-            onClick={() => { setMode("SIGN_IN"); setError(""); setSuccessMsg(""); }}
+            onClick={() => {
+              setActiveMode("PIN");
+              setLocalError(null);
+              setSuccessMsg(null);
+            }}
             className={`flex-1 py-2 text-xs font-semibold rounded-xl transition ${
-              mode === "SIGN_IN"
+              activeMode === "PIN"
                 ? "bg-white text-neutral-900 shadow"
                 : "text-neutral-400 hover:text-white"
             }`}
           >
-            Sign In
+            4-Digit PIN
           </button>
           <button
             type="button"
-            onClick={() => { setMode("CREATE_ACCOUNT"); setError(""); setSuccessMsg(""); }}
+            onClick={() => {
+              setActiveMode("REGISTER");
+              setLocalError(null);
+              setSuccessMsg(null);
+            }}
             className={`flex-1 py-2 text-xs font-semibold rounded-xl transition ${
-              mode === "CREATE_ACCOUNT"
+              activeMode === "REGISTER"
                 ? "bg-white text-neutral-900 shadow"
                 : "text-neutral-400 hover:text-white"
             }`}
           >
-            Create Passcode
+            Create Account
           </button>
         </div>
 
-        {/* Email & Passcode Form */}
-        <form onSubmit={handlePasscodeAuth} className="space-y-3.5">
-          
-          {mode === "CREATE_ACCOUNT" && (
+        {/* PIN Pad Mode */}
+        {activeMode === "PIN" && (
+          <div className="pt-1">
+            <PinPad
+              onComplete={handlePinSubmit}
+              title="Unlock Trading Desk"
+              subtitle="Enter 4-digit PIN (default: 8888 or 1234)"
+              error={effectiveError}
+              isLoading={isLoading}
+              defaultPasscodeHint="8888"
+              showQuickDemoButton={true}
+            />
+          </div>
+        )}
+
+        {/* Registration Form Mode */}
+        {activeMode === "REGISTER" && (
+          <form onSubmit={handleRegisterSubmit} className="space-y-3.5">
             <div>
               <label className="block text-xs font-mono uppercase text-neutral-400 mb-1">
                 Your Name / Trader Handle
               </label>
               <div className="relative">
-                <User className="absolute left-3.5 top-3 h-4 w-4 text-neutral-500" />
+                <UserIcon className="absolute left-3.5 top-3 h-4 w-4 text-neutral-500" />
                 <input
                   type="text"
                   required
                   placeholder="e.g. Alex Jones"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
+                  value={regName}
+                  onChange={(e) => setRegName(e.target.value)}
                   className="w-full rounded-xl border border-white/10 bg-black/50 pl-10 pr-3.5 py-2.5 font-mono text-xs text-white focus:outline-none focus:border-sky-500"
                 />
               </div>
             </div>
-          )}
 
-          <div>
-            <label className="block text-xs font-mono uppercase text-neutral-400 mb-1">
-              Trading Email *
-            </label>
-            <div className="relative">
-              <Mail className="absolute left-3.5 top-3 h-4 w-4 text-neutral-500" />
-              <input
-                type="email"
-                required
-                placeholder="your.email@gmail.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-xl border border-white/10 bg-black/50 pl-10 pr-3.5 py-2.5 font-mono text-xs text-white focus:outline-none focus:border-sky-500"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-mono uppercase text-neutral-400 mb-1">
-              {mode === "CREATE_ACCOUNT" ? "Create Security Passcode / PIN *" : "Security Passcode / PIN *"}
-            </label>
-            <div className="relative">
-              <Lock className="absolute left-3.5 top-3 h-4 w-4 text-neutral-500" />
-              <input
-                type="password"
-                required
-                placeholder="••••••••"
-                value={passcode}
-                onChange={(e) => setPasscode(e.target.value)}
-                className="w-full rounded-xl border border-white/10 bg-black/50 pl-10 pr-3.5 py-2.5 font-mono text-xs text-white focus:outline-none focus:border-sky-500"
-              />
-            </div>
-          </div>
-
-          {mode === "CREATE_ACCOUNT" && (
             <div>
               <label className="block text-xs font-mono uppercase text-neutral-400 mb-1">
-                Confirm Passcode *
+                Trading Email *
+              </label>
+              <div className="relative">
+                <Mail className="absolute left-3.5 top-3 h-4 w-4 text-neutral-500" />
+                <input
+                  type="email"
+                  required
+                  placeholder="your.email@gmail.com"
+                  value={regEmail}
+                  onChange={(e) => setRegEmail(e.target.value)}
+                  className="w-full rounded-xl border border-white/10 bg-black/50 pl-10 pr-3.5 py-2.5 font-mono text-xs text-white focus:outline-none focus:border-sky-500"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-mono uppercase text-neutral-400 mb-1">
+                Create 4-Digit PIN *
               </label>
               <div className="relative">
                 <Lock className="absolute left-3.5 top-3 h-4 w-4 text-neutral-500" />
                 <input
                   type="password"
                   required
-                  placeholder="••••••••"
-                  value={confirmPasscode}
-                  onChange={(e) => setConfirmPasscode(e.target.value)}
+                  maxLength={6}
+                  placeholder="••••"
+                  value={regPin}
+                  onChange={(e) => setRegPin(e.target.value)}
                   className="w-full rounded-xl border border-white/10 bg-black/50 pl-10 pr-3.5 py-2.5 font-mono text-xs text-white focus:outline-none focus:border-sky-500"
                 />
               </div>
             </div>
-          )}
 
-          {error && (
-            <p className="text-xs text-rose-400 font-mono bg-rose-500/10 border border-rose-500/20 rounded-xl p-2.5">{error}</p>
-          )}
+            <div>
+              <label className="block text-xs font-mono uppercase text-neutral-400 mb-1">
+                Confirm PIN *
+              </label>
+              <div className="relative">
+                <Lock className="absolute left-3.5 top-3 h-4 w-4 text-neutral-500" />
+                <input
+                  type="password"
+                  required
+                  maxLength={6}
+                  placeholder="••••"
+                  value={regConfirmPin}
+                  onChange={(e) => setRegConfirmPin(e.target.value)}
+                  className="w-full rounded-xl border border-white/10 bg-black/50 pl-10 pr-3.5 py-2.5 font-mono text-xs text-white focus:outline-none focus:border-sky-500"
+                />
+              </div>
+            </div>
 
-          {successMsg && (
-            <p className="text-xs text-emerald-400 font-mono bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-2.5 flex items-center space-x-2">
-              <CheckCircle2 className="h-4 w-4 shrink-0" />
-              <span>{successMsg}</span>
-            </p>
-          )}
+            {effectiveError && (
+              <p className="text-xs text-rose-400 font-mono bg-rose-500/10 border border-rose-500/20 rounded-xl p-2.5">
+                {effectiveError}
+              </p>
+            )}
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full flex items-center justify-center space-x-2 rounded-2xl bg-white/[0.08] border border-white/10 py-3.5 text-xs font-semibold text-white hover:bg-white/[0.14] transition active:scale-95 disabled:opacity-50"
-          >
-            <Key className="h-3.5 w-3.5 text-sky-400" />
-            <span>{mode === "CREATE_ACCOUNT" ? "Create Account & Unlock Desk" : "Unlock Trading Desk"}</span>
-          </button>
-        </form>
+            {successMsg && (
+              <p className="text-xs text-emerald-400 font-mono bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-2.5 flex items-center space-x-2">
+                <CheckCircle2 className="h-4 w-4 shrink-0" />
+                <span>{successMsg}</span>
+              </p>
+            )}
+
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="w-full flex items-center justify-center space-x-2 rounded-2xl bg-white/[0.08] border border-white/10 py-3.5 text-xs font-semibold text-white hover:bg-white/[0.14] transition active:scale-95 disabled:opacity-50"
+            >
+              <Key className="h-3.5 w-3.5 text-sky-400" />
+              <span>Create Account &amp; Unlock Desk</span>
+            </button>
+          </form>
+        )}
 
         <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-3 flex items-center space-x-2.5 text-[11px] text-neutral-400 font-mono">
           <ShieldCheck className="h-4 w-4 text-emerald-400 shrink-0" />
           <span>Sessions are protected with client-side encryption.</span>
         </div>
       </div>
+
+      {/* Google OAuth Modal */}
+      <GoogleOAuthModal
+        isOpen={isGoogleModalOpen}
+        onClose={() => setIsGoogleModalOpen(false)}
+        onSelectAccount={handleGoogleAccountSelected}
+      />
     </div>
   );
 };

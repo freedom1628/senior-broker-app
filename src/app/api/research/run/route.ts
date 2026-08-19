@@ -13,6 +13,11 @@ export async function POST(req: Request) {
       claudeText,
       chatgptText,
       manualText,
+      accountSize,
+      riskPercent,
+      geminiModel,
+      claudeModel,
+      openaiModel,
     } = body;
 
     const user = await prisma.user.findFirst({
@@ -23,6 +28,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
+    const effectiveAccount = accountSize ?? user.accountSize ?? 15000.0;
+    const effectiveRisk = riskPercent ?? user.riskPerTrade ?? 1.0;
+
     let geminiParsed, claudeParsed, chatgptParsed;
 
     if (mode === "manual") {
@@ -30,16 +38,16 @@ export async function POST(req: Request) {
         // Generic single paste
         geminiParsed = parseReportContent(manualText, "Imported Model");
       } else {
-        if (geminiText) geminiParsed = parseReportContent(geminiText, "Gemini");
-        if (claudeText) claudeParsed = parseReportContent(claudeText, "Claude");
-        if (chatgptText) chatgptParsed = parseReportContent(chatgptText, "ChatGPT");
+        if (geminiText) geminiParsed = parseReportContent(geminiText, "Gemini 3.7 Flash");
+        if (claudeText) claudeParsed = parseReportContent(claudeText, claudeModel ? (claudeModel === "claude-opus" ? "Claude Opus" : claudeModel === "claude-fable" ? "Claude Fable" : "Claude Sonnet 5") : "Claude Sonnet 5");
+        if (chatgptText) chatgptParsed = parseReportContent(chatgptText, "OpenAI 5.6");
       }
     } else {
       // Automated runs
       const [gRes, cRes, chRes] = await Promise.all([
-        runModelResearch("gemini", user.geminiKey || undefined),
-        runModelResearch("claude", user.anthropicKey || undefined),
-        runModelResearch("chatgpt", user.openaiKey || undefined),
+        runModelResearch("gemini", user.geminiKey || undefined, geminiModel),
+        runModelResearch("claude", user.anthropicKey || undefined, claudeModel),
+        runModelResearch("chatgpt", user.openaiKey || undefined, openaiModel),
       ]);
       geminiParsed = gRes.parsed;
       claudeParsed = cRes.parsed;
@@ -50,8 +58,8 @@ export async function POST(req: Request) {
       geminiParsed,
       claudeParsed,
       chatgptParsed,
-      user.accountSize,
-      user.riskPerTrade
+      effectiveAccount,
+      effectiveRisk
     );
 
     // Save ResearchRun

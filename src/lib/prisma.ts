@@ -15,8 +15,10 @@ class MemoryStore {
       id: "user-default-trader",
       email: "trader@broker.com",
       name: "Senior Desk Trader",
-      accountSize: 10000.0,
+      accountSize: 15000.0,
       riskPerTrade: 1.0,
+      maxSleeveRiskPct: 3.0,
+      maxOpenPositions: 3,
       createdAt: new Date(),
       updatedAt: new Date(),
     });

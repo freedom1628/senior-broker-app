@@ -1,23 +1,20 @@
 "use client";
 
-import React, { useState } from "react";
+import React from "react";
 import {
-  Activity,
   Bell,
   Sliders,
   Plus,
-  PlusCircle,
   TrendingUp,
   RefreshCw,
   Sparkles,
-  ShieldCheck,
-  Smartphone,
   LogOut,
-  User,
-  DollarSign,
+  Lock,
+  User as UserIcon,
 } from "lucide-react";
+import { NavigationTab } from "@/types";
 
-interface HeaderProps {
+export interface HeaderProps {
   onOpenImport: () => void;
   onOpenSettings: () => void;
   onOpenAddTrade: () => void;
@@ -29,7 +26,10 @@ interface HeaderProps {
   isPolling: boolean;
   accountSize: number;
   riskPerTrade: number;
-  currentUser?: { email: string; name: string } | null;
+  currentUser?: { email: string; name: string; avatarUrl?: string } | null;
+  activeTab?: NavigationTab;
+  onNavigateTab?: (tab: NavigationTab) => void;
+  onLockDesk?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -45,6 +45,7 @@ export const Header: React.FC<HeaderProps> = ({
   accountSize,
   riskPerTrade,
   currentUser,
+  onLockDesk,
 }) => {
   const spy = marketQuotes["SPY"];
   const qqq = marketQuotes["QQQ"];
@@ -65,9 +66,10 @@ export const Header: React.FC<HeaderProps> = ({
                 Senior Broker
               </span>
               <button
+                type="button"
                 onClick={onOpenSettings}
                 title="Click to edit capital and risk %"
-                className="flex items-center space-x-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-mono font-semibold text-emerald-300 hover:bg-emerald-500/20 transition"
+                className="flex items-center space-x-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-mono font-semibold text-emerald-300 hover:bg-emerald-500/20 transition active:scale-95"
               >
                 <span>${accountSize.toLocaleString()}</span>
                 <span className="text-neutral-400">•</span>
@@ -115,6 +117,7 @@ export const Header: React.FC<HeaderProps> = ({
           
           {/* Add Position Button */}
           <button
+            type="button"
             onClick={onOpenAddTrade}
             className="flex items-center space-x-1.5 rounded-full bg-emerald-500 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-400 transition active:scale-95"
           >
@@ -124,6 +127,7 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Ingest Research Button */}
           <button
+            type="button"
             onClick={onOpenImport}
             className="hidden sm:flex items-center space-x-1.5 rounded-full bg-white px-3.5 py-1.5 text-xs font-semibold text-neutral-900 shadow-sm hover:bg-neutral-100 transition active:scale-95"
           >
@@ -133,9 +137,10 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Live Polling Status Indicator */}
           <button
+            type="button"
             onClick={onRefreshQuotes}
-            title="Market polling is active"
-            className="hidden md:flex items-center space-x-1.5 rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-1.5 text-xs text-neutral-300 hover:bg-white/[0.08] transition"
+            title="Click to refresh market quotes"
+            className="hidden md:flex items-center space-x-1.5 rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-1.5 text-xs text-neutral-300 hover:bg-white/[0.08] transition active:scale-95"
           >
             <span className={`h-2 w-2 rounded-full ${isPolling ? "bg-emerald-400 animate-pulse" : "bg-neutral-500"}`} />
             <RefreshCw className={`h-3 w-3 text-neutral-400 ${isPolling ? "animate-spin" : ""}`} />
@@ -143,7 +148,9 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Notifications Bell */}
           <button
+            type="button"
             onClick={onOpenNotifications}
+            title="Notifications"
             className="relative flex h-9 w-9 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.04] text-neutral-300 hover:bg-white/[0.08] transition active:scale-95"
           >
             <Bell className="h-4 w-4" />
@@ -156,6 +163,7 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Settings */}
           <button
+            type="button"
             onClick={onOpenSettings}
             title="Settings & Capital"
             className="flex h-9 w-9 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.04] text-neutral-300 hover:bg-white/[0.08] transition active:scale-95"
@@ -163,10 +171,23 @@ export const Header: React.FC<HeaderProps> = ({
             <Sliders className="h-4 w-4" />
           </button>
 
+          {/* Quick Lock Desk Trigger (if provided) */}
+          {onLockDesk && (
+            <button
+              type="button"
+              onClick={onLockDesk}
+              title="Lock Trading Desk"
+              className="flex h-9 w-9 items-center justify-center rounded-full border border-amber-500/20 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 transition active:scale-95"
+            >
+              <Lock className="h-4 w-4" />
+            </button>
+          )}
+
           {/* Sign Out */}
           <button
+            type="button"
             onClick={onSignOut}
-            title="Lock Desk / Sign Out"
+            title="Sign Out / Switch Desk"
             className="flex h-9 w-9 items-center justify-center rounded-full border border-rose-500/20 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 transition active:scale-95"
           >
             <LogOut className="h-4 w-4" />

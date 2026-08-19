@@ -1,52 +1,41 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
+import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { Header } from "@/components/layout/Header";
+import { TabNavigation } from "@/components/layout/TabNavigation";
+import { MobileNav } from "@/components/layout/MobileNav";
+import { PortfolioSummaryCard } from "@/components/dashboard/PortfolioSummaryCard";
+import { CoachFeed } from "@/components/dashboard/CoachFeed";
+import { LearningCenter } from "@/components/dashboard/LearningCenter";
 import { RegimeBanner } from "@/components/dashboard/RegimeBanner";
 import { MultiModelCompare } from "@/components/dashboard/MultiModelCompare";
 import { ActiveTradesPanel } from "@/components/dashboard/ActiveTradesPanel";
 import { TradeJournal } from "@/components/dashboard/TradeJournal";
-import { DailyReportPanel } from "@/components/dashboard/DailyReportPanel";
 import { ImportModal } from "@/components/dashboard/ImportModal";
 import { SettingsModal } from "@/components/dashboard/SettingsModal";
 import { AddTradeModal } from "@/components/dashboard/AddTradeModal";
 import { NotificationCenter } from "@/components/dashboard/NotificationCenter";
 import { SignInView } from "@/components/auth/SignInView";
+import { DeskLockOverlay } from "@/components/auth/DeskLockOverlay";
 import { triggerNotificationAlert } from "@/lib/notifications/notification-service";
+import { NavigationTab } from "@/types";
 import {
-  Sparkles,
-  TrendingUp,
-  BookOpen,
-  FileText,
-  Layers,
-  Activity,
-  ShieldCheck,
-  RefreshCw,
-  LogOut,
-  Plus,
+  Sliders,
+  Shield,
+  Key,
+  DollarSign,
+  User as UserIcon,
+  CheckCircle2,
+  Lock,
+  Smartphone,
 } from "lucide-react";
 
-export default function Home() {
-  // Authentication State — Defaults to false for security
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [currentUser, setCurrentUser] = useState<{ email: string; name: string } | null>(null);
+function DeskHome() {
+  const { isAuthenticated, isLocked, currentUser, lockDesk, logout, updateDeskPin } = useAuth();
 
-  // Check cached session on mount
-  useEffect(() => {
-    const cachedAuth = localStorage.getItem("senior_broker_auth");
-    const cachedUser = localStorage.getItem("senior_broker_user");
-    if (cachedAuth === "true" && cachedUser) {
-      try {
-        setCurrentUser(JSON.parse(cachedUser));
-        setIsAuthenticated(true);
-      } catch (e) {
-        setIsAuthenticated(false);
-      }
-    }
-  }, []);
-
-  // App Navigation State
-  const [activeTab, setActiveTab] = useState<"REPORT" | "RESEARCH" | "TRADES" | "JOURNAL">("REPORT");
+  // App Navigation State (6 core views)
+  const [activeTab, setActiveTab] = useState<NavigationTab>("COACH");
   const [researchData, setResearchData] = useState<any | null>(null);
   const [candidates, setCandidates] = useState<any[]>([]);
   const [activeTrades, setActiveTrades] = useState<any[]>([]);
@@ -62,9 +51,14 @@ export default function Home() {
   });
   const [marketQuotes, setMarketQuotes] = useState<Record<string, any>>({});
   const [notifications, setNotifications] = useState<any[]>([]);
-  const [accountSize, setAccountSize] = useState<number>(10000);
+  const [accountSize, setAccountSize] = useState<number>(15000);
   const [riskPerTrade, setRiskPerTrade] = useState<number>(1.0);
   const [isPolling, setIsPolling] = useState<boolean>(false);
+
+  // In-page Settings State for SETTINGS view
+  const [pinChangeOld, setPinChangeOld] = useState("");
+  const [pinChangeNew, setPinChangeNew] = useState("");
+  const [pinChangeMsg, setPinChangeMsg] = useState<{ text: string; error?: boolean } | null>(null);
 
   // Modals
   const [isImportOpen, setIsImportOpen] = useState(false);
@@ -82,7 +76,7 @@ export default function Home() {
         setCandidates(data.candidates || []);
       }
       if (data.user) {
-        setAccountSize(data.user.accountSize || 10000);
+        setAccountSize(data.user.accountSize || 15000);
         setRiskPerTrade(data.user.riskPerTrade || 1.0);
       }
     } catch (err) {
@@ -90,7 +84,7 @@ export default function Home() {
     }
   }, []);
 
-  // 2. Fetch Trades Data
+  // 2. Fetch Trades Data (Merges Server & Local Storage Vault)
   const loadTrades = useCallback(async () => {
     try {
       const res = await fetch("/api/trades");
@@ -229,32 +223,10 @@ export default function Home() {
     }
   }, [isAuthenticated, pollMarketData]);
 
-  // Handle Sign Out
-  const handleSignOut = () => {
-    localStorage.removeItem("senior_broker_auth");
-    localStorage.removeItem("senior_broker_user");
-    setIsAuthenticated(false);
-    setCurrentUser(null);
-  };
-
-  // If not authenticated, render Sign In View
-  if (!isAuthenticated) {
-    return (
-      <SignInView
-        onAuthenticated={(u) => {
-          localStorage.setItem("senior_broker_auth", "true");
-          localStorage.setItem("senior_broker_user", JSON.stringify(u));
-          setCurrentUser(u);
-          setIsAuthenticated(true);
-        }}
-      />
-    );
-  }
-
   // Promote Candidate Setup to Trade
   const handlePromoteToTrade = async (setup: any, mode: "PENDING_ENTRY" | "ACTIVE") => {
     try {
-      const res = await fetch("/api/trades", {
+      await fetch("/api/trades", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -276,21 +248,18 @@ export default function Home() {
         }),
       });
 
-      const data = await res.json();
-      if (data.success) {
-        triggerNotificationAlert({
-          ticker: setup.ticker,
-          type: "ENTRY_TRIGGERED",
-          title: mode === "ACTIVE" ? `Position Opened: ${setup.ticker}` : `Watch Order Set: ${setup.ticker}`,
-          message: mode === "ACTIVE"
-            ? `Allocated ${setup.positionShares} shares. Hard stop strictly at $${setup.stopLoss.toFixed(2)}.`
-            : `Watching for entry trigger at $${setup.entryTrigger.toFixed(2)}.`,
-        });
-        loadTrades();
-        loadResearch();
-        loadDailyReport();
-        setActiveTab("TRADES");
-      }
+      triggerNotificationAlert({
+        ticker: setup.ticker,
+        type: "ENTRY_TRIGGERED",
+        title: mode === "ACTIVE" ? `Position Opened: ${setup.ticker}` : `Watch Order Set: ${setup.ticker}`,
+        message: mode === "ACTIVE"
+          ? `Allocated ${setup.positionShares} shares. Hard stop strictly at $${setup.stopLoss.toFixed(2)}.`
+          : `Watching for entry trigger at $${setup.entryTrigger.toFixed(2)}.`,
+      });
+      loadTrades();
+      loadResearch();
+      loadDailyReport();
+      setActiveTab("POSITIONS");
     } catch (err) {
       console.error("Error promoting setup to trade:", err);
     }
@@ -299,7 +268,7 @@ export default function Home() {
   // Scale 50% at Target 1
   const handleScaleT1 = async (tradeId: string, fillPrice?: number) => {
     try {
-      const res = await fetch("/api/trades", {
+      await fetch("/api/trades", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -308,17 +277,8 @@ export default function Home() {
           fillPrice,
         }),
       });
-      const data = await res.json();
-      if (data.success) {
-        triggerNotificationAlert({
-          ticker: data.trade.ticker,
-          type: "TARGET_1_HIT",
-          title: `T1 Scaled: ${data.trade.ticker}`,
-          message: `Took 50% profit. Stop Loss moved strictly to Breakeven ($${data.trade.currentStop.toFixed(2)}).`,
-        });
-        loadTrades();
-        loadDailyReport();
-      }
+      loadTrades();
+      loadDailyReport();
     } catch (err) {
       console.error("Error scaling T1:", err);
     }
@@ -346,7 +306,7 @@ export default function Home() {
   // Close Trade
   const handleCloseTrade = async (tradeId: string, exitReason: string, closePrice?: number) => {
     try {
-      const res = await fetch("/api/trades", {
+      await fetch("/api/trades", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -356,11 +316,8 @@ export default function Home() {
           closePrice,
         }),
       });
-      const data = await res.json();
-      if (data.success) {
-        loadTrades();
-        loadDailyReport();
-      }
+      loadTrades();
+      loadDailyReport();
     } catch (err) {
       console.error(err);
     }
@@ -369,7 +326,7 @@ export default function Home() {
   // Activate Pending Trade
   const handleActivatePending = async (tradeId: string, fillPrice?: number) => {
     try {
-      const res = await fetch("/api/trades", {
+      await fetch("/api/trades", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -378,17 +335,8 @@ export default function Home() {
           fillPrice,
         }),
       });
-      const data = await res.json();
-      if (data.success) {
-        triggerNotificationAlert({
-          ticker: data.trade.ticker,
-          type: "ENTRY_TRIGGERED",
-          title: `Trade Filled: ${data.trade.ticker}`,
-          message: `Order filled at $${(fillPrice || data.trade.entryTrigger).toFixed(2)}. Hard stop active.`,
-        });
-        loadTrades();
-        loadDailyReport();
-      }
+      loadTrades();
+      loadDailyReport();
     } catch (err) {
       console.error(err);
     }
@@ -398,6 +346,9 @@ export default function Home() {
   const handleDeleteTrade = async (tradeId: string) => {
     try {
       await fetch(`/api/trades?id=${tradeId}`, { method: "DELETE" });
+      const localTrades: any[] = JSON.parse(localStorage.getItem("senior_broker_custom_positions") || "[]");
+      const updated = localTrades.filter((t) => t.id !== tradeId);
+      localStorage.setItem("senior_broker_custom_positions", JSON.stringify(updated));
       loadTrades();
       loadDailyReport();
     } catch (err) {
@@ -419,18 +370,41 @@ export default function Home() {
     }
   };
 
+  const handleUpdatePinSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPinChangeMsg(null);
+    if (!pinChangeNew || pinChangeNew.length < 4) {
+      setPinChangeMsg({ text: "New PIN must be at least 4 digits.", error: true });
+      return;
+    }
+    const res = await updateDeskPin(pinChangeOld, pinChangeNew);
+    if (res.success) {
+      setPinChangeMsg({ text: "Desk PIN updated successfully!", error: false });
+      setPinChangeOld("");
+      setPinChangeNew("");
+    } else {
+      setPinChangeMsg({ text: res.error || "Failed to update PIN", error: true });
+    }
+  };
+
   const unreadAlertsCount = notifications.filter((n) => !n.isRead).length;
+  const highUrgencyCount = dailyReport?.highUrgencyMoves?.length || 0;
+
+  // Render Sign In if unauthenticated
+  if (!isAuthenticated) {
+    return <SignInView />;
+  }
 
   return (
-    <div className="min-h-screen bg-[#070A0F] text-slate-100 flex flex-col">
-      
+    <div className="min-h-screen bg-[#070A0F] text-slate-100 flex flex-col pb-20 sm:pb-8">
       {/* Header */}
       <Header
         onOpenImport={() => setIsImportOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenAddTrade={() => setIsAddTradeOpen(true)}
         onOpenNotifications={() => setIsNotificationsOpen(true)}
-        onSignOut={handleSignOut}
+        onSignOut={logout}
+        onLockDesk={lockDesk}
         unreadAlertsCount={unreadAlertsCount}
         marketQuotes={marketQuotes}
         onRefreshQuotes={pollMarketData}
@@ -438,82 +412,78 @@ export default function Home() {
         accountSize={accountSize}
         riskPerTrade={riskPerTrade}
         currentUser={currentUser}
+        activeTab={activeTab}
+        onNavigateTab={(t) => setActiveTab(t)}
       />
 
-      {/* Main Container */}
+      {/* Main Content Container */}
       <main className="flex-1 mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-8 space-y-8">
         
-        {/* Navigation Tabs (Apple-style pill segmented control) */}
-        <div className="flex items-center justify-center">
-          <div className="flex flex-wrap rounded-full bg-[#0E131F] p-1.5 border border-white/[0.08] shadow-lg backdrop-blur-2xl">
-            
-            <button
-              onClick={() => setActiveTab("REPORT")}
-              className={`flex items-center space-x-2 rounded-full px-4 sm:px-5 py-2 text-xs sm:text-sm font-semibold transition ${
-                activeTab === "REPORT"
-                  ? "bg-white text-neutral-900 shadow-md"
-                  : "text-neutral-400 hover:text-white"
-              }`}
-            >
-              <FileText className="h-4 w-4 text-sky-500" />
-              <span>Daily Moves To Consider</span>
-            </button>
+        {/* 1. Public.com Minimalist Portfolio Summary Card with Recharts Sparkline */}
+        <PortfolioSummaryCard
+          accountSize={accountSize}
+          riskPerTrade={riskPerTrade}
+          activeTrades={activeTrades}
+          marketQuotes={marketQuotes}
+          onOpenAddTrade={() => setIsAddTradeOpen(true)}
+          onOpenImport={() => setIsImportOpen(true)}
+          onOpenSettings={() => setIsSettingsOpen(true)}
+          onNavigateToTab={(t) => setActiveTab(t)}
+        />
 
-            <button
-              onClick={() => setActiveTab("RESEARCH")}
-              className={`flex items-center space-x-2 rounded-full px-4 sm:px-5 py-2 text-xs sm:text-sm font-semibold transition ${
-                activeTab === "RESEARCH"
-                  ? "bg-white text-neutral-900 shadow-md"
-                  : "text-neutral-400 hover:text-white"
-              }`}
-            >
-              <Sparkles className="h-4 w-4 text-indigo-400" />
-              <span>Multi-AI Deep Research</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab("TRADES")}
-              className={`flex items-center space-x-2 rounded-full px-4 sm:px-5 py-2 text-xs sm:text-sm font-semibold transition ${
-                activeTab === "TRADES"
-                  ? "bg-white text-neutral-900 shadow-md"
-                  : "text-neutral-400 hover:text-white"
-              }`}
-            >
-              <TrendingUp className="h-4 w-4 text-emerald-500" />
-              <span>Positions ({activeTrades.length + pendingTrades.length})</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab("JOURNAL")}
-              className={`flex items-center space-x-2 rounded-full px-4 sm:px-5 py-2 text-xs sm:text-sm font-semibold transition ${
-                activeTab === "JOURNAL"
-                  ? "bg-white text-neutral-900 shadow-md"
-                  : "text-neutral-400 hover:text-white"
-              }`}
-            >
-              <BookOpen className="h-4 w-4 text-purple-400" />
-              <span>Journal</span>
-            </button>
-          </div>
+        {/* 2. 6-View Pill Segmented Navigation (Desktop & Tablet) */}
+        <div className="hidden sm:block">
+          <TabNavigation
+            activeTab={activeTab}
+            onSelectTab={(tab) => setActiveTab(tab)}
+            counts={{
+              activePositions: activeTrades.length,
+              pendingOrders: pendingTrades.length,
+              unreadAlerts: unreadAlertsCount,
+              highUrgencyMoves: highUrgencyCount,
+              candidateSetups: candidates.length,
+            }}
+          />
         </div>
 
-        {/* TAB 1: DAILY REPORT */}
-        {activeTab === "REPORT" && (
-          <DailyReportPanel
-            report={dailyReport}
-            onRefreshReport={() => {
-              loadDailyReport();
-              pollMarketData();
-            }}
-            onNavigateToTrades={() => setActiveTab("TRADES")}
-            onOpenAddTrade={() => setIsAddTradeOpen(true)}
-            onOpenImport={() => setIsImportOpen(true)}
-            onOpenSettings={() => setIsSettingsOpen(true)}
-          />
+        {/* VIEW 1: COACH FEED */}
+        {activeTab === "COACH" && (
+          <div className="animate-in fade-in duration-200">
+            <CoachFeed
+              report={dailyReport}
+              activeTrades={activeTrades}
+              marketQuotes={marketQuotes}
+              onRefreshReport={() => {
+                loadDailyReport();
+                pollMarketData();
+              }}
+              onScaleT1={handleScaleT1}
+              onCloseTrade={handleCloseTrade}
+              onOpenAddTrade={() => setIsAddTradeOpen(true)}
+              onOpenLearning={() => setActiveTab("LEARNING")}
+            />
+          </div>
         )}
 
-        {/* TAB 2: RESEARCH */}
-        {activeTab === "RESEARCH" && (
+        {/* VIEW 2: ACTIVE POSITIONS & WATCHLIST */}
+        {activeTab === "POSITIONS" && (
+          <div className="animate-in fade-in duration-200">
+            <ActiveTradesPanel
+              activeTrades={activeTrades}
+              pendingTrades={pendingTrades}
+              marketQuotes={marketQuotes}
+              onScaleT1={handleScaleT1}
+              onUpdateStop={handleUpdateStop}
+              onCloseTrade={handleCloseTrade}
+              onActivatePending={handleActivatePending}
+              onDeleteTrade={handleDeleteTrade}
+              onOpenAddTrade={() => setIsAddTradeOpen(true)}
+            />
+          </div>
+        )}
+
+        {/* VIEW 3: MULTI-LLM RESEARCH & SCREENER */}
+        {activeTab === "SCREENER" && (
           <div className="space-y-8 animate-in fade-in duration-200">
             {researchData && (
               <RegimeBanner
@@ -534,24 +504,17 @@ export default function Home() {
           </div>
         )}
 
-        {/* TAB 3: LIVE TRADES & WATCHLIST */}
-        {activeTab === "TRADES" && (
+        {/* VIEW 4: INVESTOR LEARNING CENTER */}
+        {activeTab === "LEARNING" && (
           <div className="animate-in fade-in duration-200">
-            <ActiveTradesPanel
-              activeTrades={activeTrades}
-              pendingTrades={pendingTrades}
-              marketQuotes={marketQuotes}
-              onScaleT1={handleScaleT1}
-              onUpdateStop={handleUpdateStop}
-              onCloseTrade={handleCloseTrade}
-              onActivatePending={handleActivatePending}
-              onDeleteTrade={handleDeleteTrade}
-              onOpenAddTrade={() => setIsAddTradeOpen(true)}
+            <LearningCenter
+              accountSize={accountSize}
+              riskPerTrade={riskPerTrade}
             />
           </div>
         )}
 
-        {/* TAB 4: JOURNAL & ANALYTICS */}
+        {/* VIEW 5: JOURNAL & HISTORICAL PERFORMANCE */}
         {activeTab === "JOURNAL" && (
           <div className="animate-in fade-in duration-200">
             <TradeJournal
@@ -560,7 +523,184 @@ export default function Home() {
             />
           </div>
         )}
+
+        {/* VIEW 6: SETTINGS & RISK ALLOCATION */}
+        {activeTab === "SETTINGS" && (
+          <div className="space-y-6 animate-in fade-in duration-200">
+            <div className="rounded-3xl border border-white/[0.08] bg-[#0E131F] p-6 sm:p-8 backdrop-blur-2xl shadow-2xl space-y-6">
+              
+              <div className="flex items-center justify-between border-b border-white/[0.06] pb-4">
+                <div className="flex items-center space-x-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/[0.06]">
+                    <Sliders className="h-5 w-5 text-sky-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-white">
+                      Desk Allocation &amp; Security Controls
+                    </h3>
+                    <p className="text-xs text-neutral-400 font-mono">
+                      Configure swing capital, trade sizing, passcodes, and session authentication
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsSettingsOpen(true)}
+                  className="rounded-full bg-white px-4 py-2 text-xs font-semibold text-neutral-900 shadow hover:bg-neutral-100 transition active:scale-95"
+                >
+                  Open Full Settings
+                </button>
+              </div>
+
+              {/* Grid of Settings Modules */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                
+                {/* 1. Account Risk Sizing */}
+                <div className="rounded-2xl border border-white/[0.06] bg-black/30 p-5 space-y-4">
+                  <h4 className="text-xs font-mono uppercase tracking-wider text-sky-400 flex items-center space-x-2">
+                    <DollarSign className="h-4 w-4" />
+                    <span>Sleeve Sizing Parameters</span>
+                  </h4>
+                  <div className="space-y-3 font-mono text-xs">
+                    <div className="flex justify-between py-1.5 border-b border-white/[0.04]">
+                      <span className="text-neutral-400">Dedicated Swing Capital:</span>
+                      <span className="text-white font-bold">${accountSize.toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between py-1.5 border-b border-white/[0.04]">
+                      <span className="text-neutral-400">1% Max Loss / Trade:</span>
+                      <span className="text-amber-400 font-bold">${(accountSize * (riskPerTrade / 100)).toFixed(0)}</span>
+                    </div>
+                    <div className="flex justify-between py-1.5 border-b border-white/[0.04]">
+                      <span className="text-neutral-400">3.0% Max Sleeve Open Risk:</span>
+                      <span className="text-emerald-400 font-bold">${(accountSize * 0.03).toFixed(0)}</span>
+                    </div>
+                    <div className="flex justify-between py-1.5">
+                      <span className="text-neutral-400">Max Open Positions:</span>
+                      <span className="text-white font-bold">3 Concurrent Trades</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. PIN Security & Desk Lock */}
+                <div className="rounded-2xl border border-white/[0.06] bg-black/30 p-5 space-y-4">
+                  <h4 className="text-xs font-mono uppercase tracking-wider text-amber-400 flex items-center space-x-2">
+                    <Shield className="h-4 w-4" />
+                    <span>Desk PIN &amp; Quick Lock</span>
+                  </h4>
+
+                  <form onSubmit={handleUpdatePinSubmit} className="space-y-3">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[11px] text-neutral-400 font-mono mb-1">
+                          Current PIN
+                        </label>
+                        <input
+                          type="password"
+                          placeholder="••••"
+                          maxLength={6}
+                          value={pinChangeOld}
+                          onChange={(e) => setPinChangeOld(e.target.value)}
+                          className="w-full rounded-xl border border-white/10 bg-black/50 px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-amber-400"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-neutral-400 font-mono mb-1">
+                          New 4-Digit PIN
+                        </label>
+                        <input
+                          type="password"
+                          placeholder="••••"
+                          maxLength={6}
+                          value={pinChangeNew}
+                          onChange={(e) => setPinChangeNew(e.target.value)}
+                          className="w-full rounded-xl border border-white/10 bg-black/50 px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-amber-400"
+                        />
+                      </div>
+                    </div>
+
+                    {pinChangeMsg && (
+                      <p
+                        className={`text-[11px] font-mono p-2 rounded-xl border ${
+                          pinChangeMsg.error
+                            ? "text-rose-400 bg-rose-500/10 border-rose-500/20"
+                            : "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
+                        }`}
+                      >
+                        {pinChangeMsg.text}
+                      </p>
+                    )}
+
+                    <div className="flex items-center space-x-2 pt-1">
+                      <button
+                        type="submit"
+                        className="flex-1 py-2 text-xs font-semibold rounded-xl bg-white/[0.08] hover:bg-white/[0.14] text-white transition font-mono"
+                      >
+                        Update PIN
+                      </button>
+                      <button
+                        type="button"
+                        onClick={lockDesk}
+                        className="py-2 px-3 text-xs font-semibold rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 hover:bg-amber-500/20 transition font-mono flex items-center space-x-1"
+                      >
+                        <Lock className="h-3.5 w-3.5" />
+                        <span>Lock Desk</span>
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+
+              {/* Trader Identity Card */}
+              <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4 flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-center space-x-3">
+                  {currentUser?.avatarUrl ? (
+                    <img
+                      src={currentUser.avatarUrl}
+                      alt={currentUser.name}
+                      className="h-10 w-10 rounded-full object-cover border border-white/20"
+                    />
+                  ) : (
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/[0.08] text-white">
+                      <UserIcon className="h-5 w-5" />
+                    </div>
+                  )}
+                  <div>
+                    <h5 className="text-sm font-semibold text-white">{currentUser?.name || "Senior Desk Trader"}</h5>
+                    <p className="text-xs text-neutral-400 font-mono">{currentUser?.email || "trader@broker.com"}</p>
+                  </div>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <span className="rounded-full bg-emerald-500/10 border border-emerald-500/30 px-3 py-1 text-[11px] font-mono font-semibold text-emerald-400">
+                    Session Active • 256-bit Encrypted
+                  </span>
+                  <button
+                    type="button"
+                    onClick={logout}
+                    className="rounded-full bg-rose-500/10 border border-rose-500/20 px-3 py-1 text-[11px] font-mono text-rose-300 hover:bg-rose-500/20 transition"
+                  >
+                    Sign Out
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
+
+      {/* Responsive Mobile Bottom Dock Navigation */}
+      <MobileNav
+        activeTab={activeTab}
+        onSelectTab={(tab) => setActiveTab(tab)}
+        counts={{
+          activePositions: activeTrades.length,
+          pendingOrders: pendingTrades.length,
+          unreadAlerts: unreadAlertsCount,
+        }}
+        onOpenAddTrade={() => setIsAddTradeOpen(true)}
+      />
+
+      {/* Desk Lock Screen Overlay (when locked) */}
+      <DeskLockOverlay />
 
       {/* Modals */}
       <AddTradeModal
@@ -569,7 +709,7 @@ export default function Home() {
         onTradeAdded={() => {
           loadTrades();
           loadDailyReport();
-          setActiveTab("TRADES");
+          setActiveTab("POSITIONS");
         }}
         accountSize={accountSize}
         riskPerTrade={riskPerTrade}
@@ -605,5 +745,13 @@ export default function Home() {
         onMarkAllRead={handleMarkAllNotificationsRead}
       />
     </div>
+  );
+}
+
+export default function Home() {
+  return (
+    <AuthProvider>
+      <DeskHome />
+    </AuthProvider>
   );
 }
