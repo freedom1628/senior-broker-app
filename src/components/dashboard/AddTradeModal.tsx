@@ -21,7 +21,7 @@ export const AddTradeModal: React.FC<AddTradeModalProps> = ({
   const [ticker, setTicker] = useState("");
   const [companyName, setCompanyName] = useState("");
   const [status, setStatus] = useState<"ACTIVE" | "PENDING_ENTRY">("ACTIVE");
-  const [setupType, setSetupType] = useState("Catalyst Continuation");
+  const [setupType, setSetupType] = useState("Post-Earnings Pullback");
   const [entryPrice, setEntryPrice] = useState("");
   const [shares, setShares] = useState("");
   const [stopLoss, setStopLoss] = useState("");
@@ -68,10 +68,15 @@ export const AddTradeModal: React.FC<AddTradeModalProps> = ({
 
     const entry = parseFloat(entryPrice);
     const stop = parseFloat(stopLoss);
-    const t1 = parseFloat(target1) || (entry + (2 * (entry - stop)));
-    const t2 = parseFloat(target2) || (entry + (3.5 * (entry - stop)));
-    const totalShares = parseInt(shares, 10);
+    if (isNaN(entry) || isNaN(stop) || entry <= stop) {
+      setError("Entry price must be greater than Hard Stop Loss.");
+      return;
+    }
+
+    const totalShares = Math.max(1, Math.floor(parseFloat(shares) || 1));
     const riskPerShare = Math.abs(entry - stop);
+    const t1 = parseFloat(target1) || (entry + (2.0 * riskPerShare));
+    const t2 = parseFloat(target2) || (entry + (3.5 * riskPerShare));
     const rrRatio = (t1 - entry) / riskPerShare;
 
     setLoading(true);
@@ -83,7 +88,7 @@ export const AddTradeModal: React.FC<AddTradeModalProps> = ({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ticker: ticker.toUpperCase().trim(),
-          companyName: companyName.trim() || `${ticker.toUpperCase()} Inc.`,
+          companyName: companyName.trim() || `${ticker.toUpperCase().trim()} Inc.`,
           status,
           setupType,
           entryTrigger: entry,
@@ -113,16 +118,17 @@ export const AddTradeModal: React.FC<AddTradeModalProps> = ({
         setTarget2("");
         setNotes("");
       } else {
-        setError(data.error || "Failed to add trade");
+        setError(data.error || "Failed to add position");
       }
-    } catch (err) {
-      setError("Error adding position");
+    } catch (err: any) {
+      setError(err?.message || "Error adding position");
     } finally {
       setLoading(false);
     }
   };
 
-  const calculatedRisk = (parseFloat(shares) || 0) * Math.abs((parseFloat(entryPrice) || 0) - (parseFloat(stopLoss) || 0));
+  const parsedSharesNum = Math.floor(parseFloat(shares) || 0);
+  const calculatedRisk = parsedSharesNum * Math.abs((parseFloat(entryPrice) || 0) - (parseFloat(stopLoss) || 0));
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xl p-4">
@@ -189,7 +195,7 @@ export const AddTradeModal: React.FC<AddTradeModalProps> = ({
               <input
                 type="text"
                 required
-                placeholder="e.g. AAPL, PLTR, NVDA"
+                placeholder="e.g. GLBE, PLTR, NVDA"
                 value={ticker}
                 onChange={(e) => setTicker(e.target.value.toUpperCase())}
                 className="w-full rounded-xl border border-white/10 bg-black/50 px-3.5 py-2.5 font-mono text-sm text-white focus:outline-none focus:border-emerald-500 uppercase"
@@ -205,9 +211,9 @@ export const AddTradeModal: React.FC<AddTradeModalProps> = ({
                 onChange={(e) => setSetupType(e.target.value)}
                 className="w-full rounded-xl border border-white/10 bg-black/50 px-3.5 py-2.5 font-mono text-xs text-white focus:outline-none focus:border-emerald-500"
               >
+                <option value="Post-Earnings Pullback">Post-Earnings Pullback</option>
                 <option value="Catalyst Continuation">Catalyst Continuation</option>
                 <option value="Base Breakout">Base Breakout</option>
-                <option value="Post-Earnings Pullback">Post-Earnings Pullback</option>
                 <option value="Momentum High-Tight Flag">Momentum High-Tight Flag</option>
               </select>
             </div>
@@ -223,7 +229,7 @@ export const AddTradeModal: React.FC<AddTradeModalProps> = ({
                 type="number"
                 step="0.01"
                 required
-                placeholder="100.00"
+                placeholder="42.30"
                 value={entryPrice}
                 onChange={(e) => setEntryPrice(e.target.value)}
                 className="w-full rounded-xl border border-white/10 bg-black/50 px-3.5 py-2.5 font-mono text-sm text-white focus:outline-none focus:border-emerald-500"
@@ -238,7 +244,7 @@ export const AddTradeModal: React.FC<AddTradeModalProps> = ({
                 type="number"
                 step="0.01"
                 required
-                placeholder="95.00"
+                placeholder="40.20"
                 value={stopLoss}
                 onChange={(e) => setStopLoss(e.target.value)}
                 className="w-full rounded-xl border border-rose-500/30 bg-black/50 px-3.5 py-2.5 font-mono text-sm text-rose-300 focus:outline-none focus:border-rose-500"
@@ -250,7 +256,7 @@ export const AddTradeModal: React.FC<AddTradeModalProps> = ({
           <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4 space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-mono uppercase tracking-wider text-sky-400">
-                Position Sizing (1% Account Risk)
+                Position Sizing (1% Risk = ${(accountSize * (riskPerTrade / 100)).toFixed(0)})
               </span>
               <button
                 type="button"
@@ -265,12 +271,13 @@ export const AddTradeModal: React.FC<AddTradeModalProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs text-neutral-400 mb-1">
-                  Share Count *
+                  Share Count (Whole Shares) *
                 </label>
                 <input
                   type="number"
+                  step="1"
                   required
-                  placeholder="e.g. 50"
+                  placeholder="e.g. 118"
                   value={shares}
                   onChange={(e) => setShares(e.target.value)}
                   className="w-full rounded-xl border border-white/10 bg-black/50 px-3.5 py-2 font-mono text-sm text-white focus:outline-none focus:border-emerald-500"
@@ -278,7 +285,7 @@ export const AddTradeModal: React.FC<AddTradeModalProps> = ({
               </div>
 
               <div className="flex flex-col justify-center text-xs font-mono text-neutral-400">
-                <div>Capital Allocated: <span className="text-white font-bold">${((parseFloat(shares) || 0) * (parseFloat(entryPrice) || 0)).toFixed(2)}</span></div>
+                <div>Capital Allocated: <span className="text-white font-bold">${(parsedSharesNum * (parseFloat(entryPrice) || 0)).toFixed(2)}</span></div>
                 <div>Risk on Trade: <span className="text-amber-400 font-bold">${calculatedRisk.toFixed(2)}</span> ({((calculatedRisk / accountSize) * 100).toFixed(1)}% of ${accountSize.toLocaleString()})</div>
               </div>
             </div>
@@ -293,7 +300,7 @@ export const AddTradeModal: React.FC<AddTradeModalProps> = ({
               <input
                 type="number"
                 step="0.01"
-                placeholder="110.00"
+                placeholder="48.00"
                 value={target1}
                 onChange={(e) => setTarget1(e.target.value)}
                 className="w-full rounded-xl border border-emerald-500/30 bg-black/50 px-3.5 py-2.5 font-mono text-sm text-emerald-300 focus:outline-none focus:border-emerald-500"
@@ -307,7 +314,7 @@ export const AddTradeModal: React.FC<AddTradeModalProps> = ({
               <input
                 type="number"
                 step="0.01"
-                placeholder="120.00"
+                placeholder="52.00"
                 value={target2}
                 onChange={(e) => setTarget2(e.target.value)}
                 className="w-full rounded-xl border border-purple-500/30 bg-black/50 px-3.5 py-2.5 font-mono text-sm text-purple-300 focus:outline-none focus:border-purple-500"

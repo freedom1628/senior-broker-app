@@ -6,12 +6,17 @@ export async function GET() {
   try {
     await ensureSeedData();
 
-    const user = await prisma.user.findFirst({
-      where: { email: "trader@broker.com" },
-    });
+    let user = await prisma.user.findFirst();
 
     if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
+      user = await prisma.user.create({
+        data: {
+          email: "trader@broker.com",
+          name: "Senior Trader",
+          accountSize: 10000.0,
+          riskPerTrade: 1.0,
+        },
+      });
     }
 
     const trades = await prisma.trade.findMany({
@@ -53,20 +58,29 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const user = await prisma.user.findFirst({
-      where: { email: "trader@broker.com" },
-    });
 
+    let user = await prisma.user.findFirst();
     if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
+      await ensureSeedData();
+      user = await prisma.user.findFirst();
+    }
+    if (!user) {
+      user = await prisma.user.create({
+        data: {
+          email: "trader@broker.com",
+          name: "Senior Trader",
+          accountSize: 10000.0,
+          riskPerTrade: 1.0,
+        },
+      });
     }
 
     const {
       candidateId,
       ticker,
       companyName,
-      status = "PENDING_ENTRY",
-      setupType,
+      status = "ACTIVE",
+      setupType = "Catalyst Continuation",
       entryTrigger,
       actualEntry,
       sharesTotal,
@@ -79,53 +93,70 @@ export async function POST(req: Request) {
       notes,
     } = body;
 
+    const parsedEntry = parseFloat(entryTrigger);
+    const parsedStop = parseFloat(initialStop);
+    const parsedT1 = parseFloat(target1 || (parsedEntry + 2 * Math.abs(parsedEntry - parsedStop)));
+    const parsedT2 = parseFloat(target2 || (parsedEntry + 3.5 * Math.abs(parsedEntry - parsedStop)));
+    const parsedShares = Math.max(1, Math.floor(parseFloat(sharesTotal) || 1));
+    const riskPerShare = Math.max(0.01, Math.abs(parsedEntry - parsedStop));
+    const parsedRR = parseFloat(rrRatio?.toString() || ((parsedT1 - parsedEntry) / riskPerShare).toFixed(2));
+
     const trade = await prisma.trade.create({
       data: {
         userId: user.id,
-        ticker: ticker.toUpperCase(),
-        companyName: companyName || `${ticker} Corp`,
-        status,
+        ticker: ticker.toUpperCase().trim(),
+        companyName: companyName ? companyName.trim() : `${ticker.toUpperCase().trim()} Inc.`,
+        status: status || "ACTIVE",
         setupType: setupType || "Catalyst Continuation",
-        entryTrigger,
-        actualEntry: status === "ACTIVE" ? (actualEntry || entryTrigger) : null,
+        entryTrigger: parsedEntry,
+        entryCondition: "Manual Entry Logged",
+        actualEntry: status === "ACTIVE" ? (actualEntry ? parseFloat(actualEntry) : parsedEntry) : null,
         entryDate: status === "ACTIVE" ? new Date() : null,
-        sharesTotal,
-        sharesRemaining: sharesTotal,
-        initialStop,
-        currentStop: currentStop || initialStop,
-        target1,
-        target2,
-        rrRatio: rrRatio || 2.0,
-        timeStopSessions,
+        sharesTotal: parsedShares,
+        sharesRemaining: parsedShares,
+        initialStop: parsedStop,
+        currentStop: currentStop ? parseFloat(currentStop) : parsedStop,
+        target1: parsedT1,
+        target2: parsedT2,
+        rrRatio: parsedRR,
+        timeStopSessions: parseInt(timeStopSessions?.toString() || "6", 10) || 6,
         sessionsElapsed: 0,
-        notes,
+        notes: notes || "Manual trade entry",
       },
     });
 
     if (candidateId) {
-      await prisma.candidateSetup.update({
-        where: { id: candidateId },
-        data: { status: "PROMOTED" },
-      });
+      try {
+        await prisma.candidateSetup.update({
+          where: { id: candidateId },
+          data: { status: "PROMOTED" },
+        });
+      } catch (e) {
+        // non-fatal if candidate not in db
+      }
     }
 
     // Add alert notification
-    await prisma.alertNotification.create({
-      data: {
-        userId: user.id,
-        ticker: trade.ticker,
-        type: status === "ACTIVE" ? "ENTRY_TRIGGERED" : "ENTRY_TRIGGERED",
-        title: status === "ACTIVE" ? `Position Opened: ${trade.ticker}` : `Watching Order: ${trade.ticker}`,
-        message: status === "ACTIVE"
-          ? `Entered ${trade.sharesTotal} shares at $${(actualEntry || entryTrigger).toFixed(2)}. Hard stop active at $${initialStop.toFixed(2)}.`
-          : `Watch trigger active at $${entryTrigger.toFixed(2)}. Alert will trigger when touched.`,
-      },
-    });
+    try {
+      await prisma.alertNotification.create({
+        data: {
+          userId: user.id,
+          ticker: trade.ticker,
+          type: "ENTRY_TRIGGERED",
+          title: status === "ACTIVE" ? `Position Opened: ${trade.ticker}` : `Watching Order: ${trade.ticker}`,
+          message: status === "ACTIVE"
+            ? `Entered ${trade.sharesTotal} shares at $${(trade.actualEntry || trade.entryTrigger).toFixed(2)}. Hard stop active at $${trade.initialStop.toFixed(2)}.`
+            : `Watch trigger active at $${trade.entryTrigger.toFixed(2)}. Alert will trigger when touched.`,
+        },
+      });
+    } catch (e) {
+      // non-fatal
+    }
 
     return NextResponse.json({ success: true, trade });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error creating trade:", error);
-    return NextResponse.json({ error: "Failed to create trade" }, { status: 500 });
+    return NextResponse.json({ error: error?.message || "Failed to create trade" }, { status: 500 });
   }
 }
 
