@@ -19,16 +19,16 @@ export async function GET() {
       orderBy: { createdAt: "desc" },
     });
 
-    const activeTrades = trades.filter(t => t.status === "ACTIVE" || t.status === "SCALED_T1");
-    const pendingTrades = trades.filter(t => t.status === "PENDING_ENTRY");
-    const closedTrades = trades.filter(t => t.status === "CLOSED");
+    const activeTrades = trades.filter((t: any) => t.status === "ACTIVE" || t.status === "SCALED_T1");
+    const pendingTrades = trades.filter((t: any) => t.status === "PENDING_ENTRY");
+    const closedTrades = trades.filter((t: any) => t.status === "CLOSED");
 
     // Portfolio metrics
-    const totalRealizedPnL = closedTrades.reduce((acc, t) => acc + (t.realizedPnL || 0), 0);
-    const winTrades = closedTrades.filter(t => (t.realizedPnL || 0) > 0);
+    const totalRealizedPnL = closedTrades.reduce((acc: number, t: any) => acc + (t.realizedPnL || 0), 0);
+    const winTrades = closedTrades.filter((t: any) => (t.realizedPnL || 0) > 0);
     const winRate = closedTrades.length > 0 ? (winTrades.length / closedTrades.length) * 100 : 0;
     const avgRMultiple = closedTrades.length > 0
-      ? closedTrades.reduce((acc, t) => acc + (t.rMultiple || 0), 0) / closedTrades.length
+      ? closedTrades.reduce((acc: number, t: any) => acc + (t.rMultiple || 0), 0) / closedTrades.length
       : 0;
 
     return NextResponse.json({

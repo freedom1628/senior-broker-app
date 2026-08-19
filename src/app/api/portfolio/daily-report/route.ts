@@ -21,7 +21,7 @@ export async function GET() {
       where: { userId: user.id },
     });
 
-    const tickers = Array.from(new Set(trades.map(t => t.ticker.toUpperCase())));
+    const tickers: string[] = Array.from(new Set(trades.map((t: any) => t.ticker.toUpperCase() as string)));
     const quotes = await getMultipleQuotes(["SPY", "QQQ", "VIX", ...tickers]);
 
     const latestRegime = user.researchRuns[0]?.marketRegime || "FAVORABLE";

@@ -22,7 +22,7 @@ export async function POST() {
       return NextResponse.json({ evaluatedCount: 0, alerts: [] });
     }
 
-    const tickers = Array.from(new Set(openTrades.map(t => t.ticker)));
+    const tickers: string[] = Array.from(new Set(openTrades.map((t: any) => t.ticker as string)));
     const quotes = await getMultipleQuotes(tickers);
 
     const alerts: TradeEvaluation[] = [];

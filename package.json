@@ -4,11 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
-    "cf:build": "opennextjs-cloudflare build",
-    "cf:deploy": "opennextjs-cloudflare build && wrangler pages deploy",
+    "postinstall": "prisma generate",
+    "cf:build": "prisma generate && opennextjs-cloudflare build",
+    "cf:deploy": "prisma generate && opennextjs-cloudflare build && wrangler pages deploy",
     "cf:preview": "opennextjs-cloudflare preview"
   },
   "dependencies": {
