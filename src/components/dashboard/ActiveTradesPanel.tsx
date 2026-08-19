@@ -23,6 +23,7 @@ interface ActiveTradesPanelProps {
   onCloseTrade: (tradeId: string, exitReason: string, closePrice?: number) => void;
   onActivatePending: (tradeId: string, fillPrice?: number) => void;
   onDeleteTrade: (tradeId: string) => void;
+  onOpenAddTrade?: () => void;
 }
 
 export const ActiveTradesPanel: React.FC<ActiveTradesPanelProps> = ({
@@ -34,6 +35,7 @@ export const ActiveTradesPanel: React.FC<ActiveTradesPanelProps> = ({
   onCloseTrade,
   onActivatePending,
   onDeleteTrade,
+  onOpenAddTrade,
 }) => {
   const [selectedTrade, setSelectedTrade] = useState<any | null>(null);
   const [editStopModal, setEditStopModal] = useState<{ trade: any; stopPrice: string } | null>(null);
@@ -43,7 +45,7 @@ export const ActiveTradesPanel: React.FC<ActiveTradesPanelProps> = ({
       
       {/* Active Positions Section */}
       <div className="rounded-3xl border border-white/[0.08] bg-[#0C101A]/80 p-6 backdrop-blur-2xl shadow-xl">
-        <div className="flex items-center justify-between border-b border-white/[0.06] pb-4 mb-6">
+        <div className="flex flex-wrap items-center justify-between border-b border-white/[0.06] pb-4 mb-6 gap-3">
           <div>
             <h3 className="text-lg font-semibold text-white flex items-center space-x-2">
               <TrendingUp className="h-5 w-5 text-emerald-400" />
@@ -53,11 +55,28 @@ export const ActiveTradesPanel: React.FC<ActiveTradesPanelProps> = ({
               Continuously monitored with real-time stops, profit thresholds, and session countdowns
             </p>
           </div>
+
+          {onOpenAddTrade && (
+            <button
+              onClick={onOpenAddTrade}
+              className="flex items-center space-x-1.5 rounded-full bg-emerald-500 px-4 py-2 text-xs font-semibold text-white shadow hover:bg-emerald-400 transition active:scale-95"
+            >
+              <span>+ Add Position</span>
+            </button>
+          )}
         </div>
 
         {activeTrades.length === 0 ? (
-          <div className="py-12 text-center text-neutral-500 text-sm">
-            No active positions open. Promote candidate setups from today's research to begin tracking.
+          <div className="py-12 text-center text-neutral-400 space-y-3">
+            <p className="text-sm">No active positions logged yet.</p>
+            {onOpenAddTrade && (
+              <button
+                onClick={onOpenAddTrade}
+                className="inline-flex items-center space-x-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20 transition"
+              >
+                <span>+ Log Your First Swing Position</span>
+              </button>
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

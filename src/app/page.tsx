@@ -9,6 +9,7 @@ import { TradeJournal } from "@/components/dashboard/TradeJournal";
 import { DailyReportPanel } from "@/components/dashboard/DailyReportPanel";
 import { ImportModal } from "@/components/dashboard/ImportModal";
 import { SettingsModal } from "@/components/dashboard/SettingsModal";
+import { AddTradeModal } from "@/components/dashboard/AddTradeModal";
 import { NotificationCenter } from "@/components/dashboard/NotificationCenter";
 import { SignInView } from "@/components/auth/SignInView";
 import { triggerNotificationAlert } from "@/lib/notifications/notification-service";
@@ -22,6 +23,7 @@ import {
   ShieldCheck,
   RefreshCw,
   LogOut,
+  Plus,
 } from "lucide-react";
 
 export default function Home() {
@@ -67,6 +69,7 @@ export default function Home() {
   // Modals
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isAddTradeOpen, setIsAddTradeOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
 
   // 1. Fetch Research Data
@@ -392,12 +395,15 @@ export default function Home() {
       <Header
         onOpenImport={() => setIsImportOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenAddTrade={() => setIsAddTradeOpen(true)}
         onOpenNotifications={() => setIsNotificationsOpen(true)}
         onSignOut={handleSignOut}
         unreadAlertsCount={unreadAlertsCount}
         marketQuotes={marketQuotes}
         onRefreshQuotes={pollMarketData}
         isPolling={isPolling}
+        accountSize={accountSize}
+        riskPerTrade={riskPerTrade}
         currentUser={currentUser}
       />
 
@@ -467,6 +473,9 @@ export default function Home() {
               pollMarketData();
             }}
             onNavigateToTrades={() => setActiveTab("TRADES")}
+            onOpenAddTrade={() => setIsAddTradeOpen(true)}
+            onOpenImport={() => setIsImportOpen(true)}
+            onOpenSettings={() => setIsSettingsOpen(true)}
           />
         )}
 
@@ -504,6 +513,7 @@ export default function Home() {
               onCloseTrade={handleCloseTrade}
               onActivatePending={handleActivatePending}
               onDeleteTrade={handleDeleteTrade}
+              onOpenAddTrade={() => setIsAddTradeOpen(true)}
             />
           </div>
         )}
@@ -520,6 +530,18 @@ export default function Home() {
       </main>
 
       {/* Modals */}
+      <AddTradeModal
+        isOpen={isAddTradeOpen}
+        onClose={() => setIsAddTradeOpen(false)}
+        onTradeAdded={() => {
+          loadTrades();
+          loadDailyReport();
+          setActiveTab("TRADES");
+        }}
+        accountSize={accountSize}
+        riskPerTrade={riskPerTrade}
+      />
+
       <ImportModal
         isOpen={isImportOpen}
         onClose={() => setIsImportOpen(false)}

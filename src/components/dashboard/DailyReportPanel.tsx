@@ -21,12 +21,18 @@ interface DailyReportPanelProps {
   report: DailyPortfolioReport | null;
   onRefreshReport: () => void;
   onNavigateToTrades: () => void;
+  onOpenAddTrade?: () => void;
+  onOpenImport?: () => void;
+  onOpenSettings?: () => void;
 }
 
 export const DailyReportPanel: React.FC<DailyReportPanelProps> = ({
   report,
   onRefreshReport,
   onNavigateToTrades,
+  onOpenAddTrade,
+  onOpenImport,
+  onOpenSettings,
 }) => {
   const [copied, setCopied] = useState(false);
 
@@ -64,6 +70,51 @@ ${deskChecklist.map(c => `• ${c}`).join("\n")}
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
       
+      {/* Quick Start Guide Card for New Users */}
+      <div className="rounded-3xl border border-sky-500/20 bg-gradient-to-r from-sky-500/[0.08] to-indigo-500/[0.08] p-6 backdrop-blur-2xl">
+        <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+          <div className="flex items-center space-x-2.5">
+            <Sparkles className="h-5 w-5 text-sky-400" />
+            <h3 className="text-base font-semibold text-white">
+              Senior Broker Swing Trading Workflow
+            </h3>
+          </div>
+          <div className="flex items-center space-x-2">
+            {onOpenAddTrade && (
+              <button
+                onClick={onOpenAddTrade}
+                className="rounded-full bg-emerald-500 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-emerald-400 transition"
+              >
+                + Add Current Position
+              </button>
+            )}
+            {onOpenSettings && (
+              <button
+                onClick={onOpenSettings}
+                className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-neutral-300 hover:bg-white/[0.08] transition"
+              >
+                Set Capital &amp; Risk
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+          <div className="rounded-2xl border border-white/[0.06] bg-black/30 p-3.5 space-y-1">
+            <span className="font-mono text-sky-400 font-bold block">1. Add Open Positions</span>
+            <p className="text-neutral-300">Click <strong>+ Add Position</strong> to input your current stocks with entry, stop loss, and targets.</p>
+          </div>
+          <div className="rounded-2xl border border-white/[0.06] bg-black/30 p-3.5 space-y-1">
+            <span className="font-mono text-indigo-400 font-bold block">2. Ingest AI Research</span>
+            <p className="text-neutral-300">Run or paste daily research from <strong>Gemini 3.7</strong>, <strong>Claude (Sonnet 5/Opus)</strong>, and <strong>OpenAI 5.6</strong>.</p>
+          </div>
+          <div className="rounded-2xl border border-white/[0.06] bg-black/30 p-3.5 space-y-1">
+            <span className="font-mono text-emerald-400 font-bold block">3. Review Daily Moves</span>
+            <p className="text-neutral-300">The Senior Broker watches market quotes and tells you when to scale 50% at T1, trail stops to B/E, or exit.</p>
+          </div>
+        </div>
+      </div>
+
       {/* Top Header Card */}
       <div className="rounded-3xl border border-white/[0.08] bg-[#0C101A]/80 p-6 backdrop-blur-2xl shadow-xl flex flex-wrap items-center justify-between gap-4">
         <div>
