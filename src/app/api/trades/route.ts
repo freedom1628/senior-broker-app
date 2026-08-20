@@ -315,13 +315,26 @@ export async function PUT(req: Request) {
 export async function DELETE(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
+    const clearAll = searchParams.get("clearAll");
     const id = searchParams.get("id");
+
+    if (clearAll === "true") {
+      const user = await prisma.user.findFirst();
+      if (user) {
+        const trades = await prisma.trade.findMany({ where: { userId: user.id } });
+        for (const t of trades) {
+          await prisma.trade.delete({ where: { id: t.id } });
+        }
+      }
+      return NextResponse.json({ success: true, cleared: true });
+    }
+
     if (!id) return NextResponse.json({ error: "Missing ID" }, { status: 400 });
 
     await prisma.trade.delete({ where: { id } });
     return NextResponse.json({ success: true });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error deleting trade:", error);
-    return NextResponse.json({ error: "Failed to delete trade" }, { status: 500 });
+    return NextResponse.json({ error: error?.message || "Failed to delete trade" }, { status: 500 });
   }
 }

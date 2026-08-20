@@ -736,6 +736,10 @@ function DeskHome() {
           loadResearch();
           loadDailyReport();
         }}
+        onResetAllData={() => {
+          loadTrades();
+          loadDailyReport();
+        }}
       />
 
       <NotificationCenter

@@ -169,15 +169,15 @@ export const Header: React.FC<HeaderProps> = ({
             {soundMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
           </button>
 
-          {/* Live Polling Status Indicator */}
+          {/* Live Market Tape Status Indicator */}
           <button
             type="button"
             onClick={onRefreshQuotes}
-            title="Click to refresh market quotes"
+            title="Market Tape Connected (Click to Refresh)"
             className="hidden md:flex items-center space-x-1.5 rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-1.5 text-xs text-neutral-300 hover:bg-white/[0.08] transition active:scale-95"
           >
-            <span className={`h-2 w-2 rounded-full ${isPolling ? "bg-emerald-400 animate-pulse" : "bg-neutral-500"}`} />
-            <RefreshCw className={`h-3 w-3 text-neutral-400 ${isPolling ? "animate-spin" : ""}`} />
+            <span className="h-2 w-2 rounded-full bg-emerald-400" />
+            <RefreshCw className="h-3 w-3 text-neutral-400" />
           </button>
 
           {/* Notifications Bell */}
