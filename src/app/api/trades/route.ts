@@ -129,7 +129,7 @@ export async function POST(req: Request) {
     const riskPerShare = Math.max(0.01, Math.abs(parsedEntry - parsedStop));
     const parsedT1 = parseFloat(target1) || Number((parsedEntry + 2.0 * riskPerShare).toFixed(2));
     const parsedT2 = parseFloat(target2) || Number((parsedEntry + 3.5 * riskPerShare).toFixed(2));
-    const parsedShares = Math.max(1, Math.floor(parseFloat(sharesTotal) || 1));
+    const parsedShares = Math.max(0.001, parseFloat(sharesTotal) || 1);
     const parsedRR = parseFloat(rrRatio?.toString() || ((parsedT1 - parsedEntry) / riskPerShare).toFixed(2));
 
     const isClosed = status === "CLOSED";
@@ -152,7 +152,7 @@ export async function POST(req: Request) {
         realizedPnL: isClosed ? (realizedPnL !== undefined ? parseFloat(realizedPnL) : 0) : null,
         rMultiple: isClosed ? (rMultiple !== undefined ? parseFloat(rMultiple) : 0) : null,
         sharesTotal: parsedShares,
-        sharesRemaining: isClosed ? 0 : (sharesRemaining !== undefined ? parseInt(sharesRemaining) : parsedShares),
+        sharesRemaining: isClosed ? 0 : (sharesRemaining !== undefined ? parseFloat(sharesRemaining) : parsedShares),
         initialStop: parsedStop,
         currentStop: currentStop ? parseFloat(currentStop) : parsedStop,
         target1: parsedT1,
@@ -209,7 +209,7 @@ export async function PUT(req: Request) {
         closedPrice: body.closedPrice !== undefined ? parseFloat(body.closedPrice) : existing.closedPrice,
         initialStop: body.initialStop !== undefined ? parseFloat(body.initialStop) : existing.initialStop,
         currentStop: body.currentStop !== undefined ? parseFloat(body.currentStop) : existing.currentStop,
-        sharesTotal: body.sharesTotal !== undefined ? parseInt(body.sharesTotal) : existing.sharesTotal,
+        sharesTotal: body.sharesTotal !== undefined ? parseFloat(body.sharesTotal) : existing.sharesTotal,
         entryDate: body.entryDate ? new Date(body.entryDate) : existing.entryDate,
         closedDate: body.closedDate ? new Date(body.closedDate) : existing.closedDate,
         exitReason: body.exitReason || existing.exitReason,

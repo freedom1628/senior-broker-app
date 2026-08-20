@@ -87,13 +87,16 @@ export const QuickEntryModal: React.FC<QuickEntryModalProps> = ({
     }
   }, [initialCandidate, isOpen]);
 
+  const [customRealizedPnL, setCustomRealizedPnL] = useState("");
+  const [isManualPnL, setIsManualPnL] = useState(false);
+
   const parsedEntry = parseFloat(entryPrice) || 0;
   const parsedStop = parseFloat(stopLoss) || 0;
   const parsedT1 = parseFloat(target1) || undefined;
   const parsedT2 = parseFloat(target2) || undefined;
   const parsedAtr = parseFloat(atr) || undefined;
   const parsedExit = parseFloat(exitPrice) || 0;
-  const parsedShares = parseInt(shares, 10) || 0;
+  const parsedShares = parseFloat(shares) || 0;
 
   // Real-time Reactive Sizing calculation
   const sizingResult: SizingResult | null = useMemo(() => {
@@ -125,17 +128,30 @@ export const QuickEntryModal: React.FC<QuickEntryModalProps> = ({
     }
   }, [sizingResult, isManualShares, target1, target2, status]);
 
-  // For CLOSED positions, compute realized P&L and R-multiple
+  // For CLOSED positions, compute default realized P&L and R-multiple
   const calculatedRealizedPnL = useMemo(() => {
     if (status !== "CLOSED" || parsedEntry <= 0 || parsedExit <= 0 || parsedShares <= 0) return 0;
     return Number(((parsedExit - parsedEntry) * parsedShares).toFixed(2));
   }, [status, parsedEntry, parsedExit, parsedShares]);
 
+  // Auto-sync custom PnL if not manually edited
+  useEffect(() => {
+    if (status === "CLOSED" && !isManualPnL && calculatedRealizedPnL !== 0) {
+      setCustomRealizedPnL(calculatedRealizedPnL.toFixed(2));
+    }
+  }, [status, isManualPnL, calculatedRealizedPnL]);
+
+  const activePnL = useMemo(() => {
+    const p = parseFloat(customRealizedPnL);
+    return !isNaN(p) ? p : calculatedRealizedPnL;
+  }, [customRealizedPnL, calculatedRealizedPnL]);
+
   const calculatedRMultiple = useMemo(() => {
-    if (status !== "CLOSED" || parsedEntry <= 0 || parsedStop <= 0 || parsedEntry === parsedStop) return 0;
+    if (status !== "CLOSED" || parsedEntry <= 0 || parsedStop <= 0 || parsedEntry === parsedStop || parsedShares <= 0) return 0;
     const riskPerShare = Math.abs(parsedEntry - parsedStop);
-    return Number(((parsedExit - parsedEntry) / riskPerShare).toFixed(2));
-  }, [status, parsedEntry, parsedStop, parsedExit]);
+    const totalPlannedRisk = riskPerShare * parsedShares;
+    return totalPlannedRisk > 0 ? Number((activePnL / totalPlannedRisk).toFixed(2)) : 0;
+  }, [status, parsedEntry, parsedStop, parsedShares, activePnL]);
 
   // Rule Guardrail Validation for proposed trade
   const ruleCheck: PortfolioRuleCheckResult | null = useMemo(() => {
@@ -214,7 +230,7 @@ export const QuickEntryModal: React.FC<QuickEntryModalProps> = ({
         payload.closedDate = exitDate ? new Date(exitDate).toISOString() : new Date().toISOString();
         payload.closedPrice = parsedExit;
         payload.exitReason = exitReason;
-        payload.realizedPnL = calculatedRealizedPnL;
+        payload.realizedPnL = activePnL;
         payload.rMultiple = calculatedRMultiple;
       }
 
@@ -522,20 +538,42 @@ export const QuickEntryModal: React.FC<QuickEntryModalProps> = ({
                   </select>
                 </div>
 
-                {/* Realized P&L Summary Box */}
-                <div className="rounded-xl border border-white/10 bg-black/40 p-2.5 flex items-center justify-between font-mono text-xs">
-                  <div>
-                    <span className="text-neutral-400 block text-[10px] uppercase">Realized P&amp;L</span>
-                    <span className={`text-base font-bold ${calculatedRealizedPnL >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-                      {calculatedRealizedPnL >= 0 ? "+" : ""}${calculatedRealizedPnL.toFixed(2)}
-                    </span>
+                {/* Realized P&L Editable Field */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-[11px] font-mono text-neutral-400">
+                      Realized P&amp;L ($) *
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsManualPnL(false);
+                        setCustomRealizedPnL(calculatedRealizedPnL.toFixed(2));
+                      }}
+                      className="text-[10px] font-mono text-sky-400 underline hover:text-sky-300"
+                    >
+                      Auto: ${(calculatedRealizedPnL).toFixed(2)}
+                    </button>
                   </div>
-                  <div>
-                    <span className="text-neutral-400 block text-[10px] uppercase">R-Multiple</span>
-                    <span className={`text-base font-bold ${calculatedRMultiple >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-                      {calculatedRMultiple >= 0 ? "+" : ""}{calculatedRMultiple.toFixed(2)}R
-                    </span>
+                  <div className="relative">
+                    <span className="absolute left-3 top-2 text-neutral-500 font-mono text-xs">$</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      placeholder="-303.84"
+                      value={customRealizedPnL}
+                      onChange={(e) => {
+                        setIsManualPnL(true);
+                        setCustomRealizedPnL(e.target.value);
+                      }}
+                      className={`w-full rounded-xl border bg-black/50 pl-7 pr-3.5 py-1.5 font-mono text-xs font-bold focus:outline-none ${
+                        activePnL >= 0 ? "border-emerald-500/30 text-emerald-300 focus:border-emerald-500" : "border-rose-500/30 text-rose-300 focus:border-rose-500"
+                      }`}
+                    />
                   </div>
+                  <span className="text-[10px] font-mono text-neutral-400 mt-1 block">
+                    Calculated R-Multiple: <strong className={calculatedRMultiple >= 0 ? "text-emerald-400" : "text-rose-400"}>{calculatedRMultiple >= 0 ? "+" : ""}{calculatedRMultiple.toFixed(2)}R</strong>
+                  </span>
                 </div>
               </div>
             </div>
