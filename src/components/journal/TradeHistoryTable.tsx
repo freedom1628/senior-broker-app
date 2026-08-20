@@ -30,11 +30,15 @@ export const TradeHistoryTable: React.FC<TradeHistoryTableProps> = ({
   const sortedTrades = [...closedTrades].sort((a, b) => {
     let comp = 0;
     if (sortCol === "date") {
-      const dateA = a.closedDate || a.createdAt || "";
-      const dateB = b.closedDate || b.createdAt || "";
-      comp = dateA.localeCompare(dateB);
+      const getT = (t: Trade) => {
+        const d = t.closedDate || t.createdAt;
+        if (!d) return 0;
+        const time = new Date(d).getTime();
+        return isNaN(time) ? 0 : time;
+      };
+      comp = getT(a) - getT(b);
     } else if (sortCol === "ticker") {
-      comp = a.ticker.localeCompare(b.ticker);
+      comp = (a.ticker || "").localeCompare(b.ticker || "");
     } else if (sortCol === "pnl") {
       comp = (a.realizedPnL || 0) - (b.realizedPnL || 0);
     } else if (sortCol === "r") {
@@ -113,9 +117,10 @@ export const TradeHistoryTable: React.FC<TradeHistoryTableProps> = ({
             </thead>
             <tbody className="divide-y divide-white/[0.04] font-mono">
               {sortedTrades.map((t) => {
-                const entry = t.actualEntry || t.entryTrigger;
-                const exit = t.closedPrice || entry;
-                const pnl = t.realizedPnL || 0;
+                const entry = typeof t.actualEntry === "number" ? t.actualEntry : (typeof t.entryTrigger === "number" ? t.entryTrigger : 0);
+                const exit = typeof t.closedPrice === "number" ? t.closedPrice : entry;
+                const stopVal = typeof t.initialStop === "number" ? t.initialStop : (typeof t.currentStop === "number" ? t.currentStop : 0);
+                const pnl = typeof t.realizedPnL === "number" ? t.realizedPnL : 0;
                 const isWin = pnl >= 0;
 
                 return (
@@ -127,13 +132,13 @@ export const TradeHistoryTable: React.FC<TradeHistoryTableProps> = ({
                     {/* Ticker & Setup */}
                     <td className="px-6 py-4">
                       <div className="flex items-center space-x-2">
-                        <span className="font-bold text-white text-sm">{t.ticker}</span>
+                        <span className="font-bold text-white text-sm">{t.ticker || "UNKNOWN"}</span>
                         <span title="Discipline Honored">
                           <ShieldCheck className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
                         </span>
                       </div>
                       <div className="text-[10px] font-sans text-neutral-400 truncate max-w-[130px]">
-                        {t.companyName}
+                        {t.companyName || `${t.ticker} Corp`}
                       </div>
                       {t.setupType && (
                         <div className="text-[9px] font-sans text-sky-400 mt-0.5">
@@ -144,13 +149,13 @@ export const TradeHistoryTable: React.FC<TradeHistoryTableProps> = ({
 
                     {/* Entry & Stop */}
                     <td className="px-4 py-4 text-neutral-300">
-                      <div>Fill: ${entry.toFixed(2)}</div>
-                      <div className="text-[10px] text-rose-400">Stop: ${t.initialStop.toFixed(2)}</div>
+                      <div>Fill: ${Number(entry).toFixed(2)}</div>
+                      <div className="text-[10px] text-rose-400">Stop: ${Number(stopVal).toFixed(2)}</div>
                     </td>
 
                     {/* Exit Fill */}
                     <td className="px-4 py-4 text-white font-bold">
-                      ${t.closedPrice ? t.closedPrice.toFixed(2) : exit.toFixed(2)}
+                      ${Number(exit).toFixed(2)}
                     </td>
 
                     {/* Realized P&L */}
@@ -160,7 +165,7 @@ export const TradeHistoryTable: React.FC<TradeHistoryTableProps> = ({
                           isWin ? "text-emerald-400" : "text-rose-400"
                         }`}
                       >
-                        {isWin ? "+" : ""}${pnl.toFixed(2)}
+                        {isWin ? "+" : ""}${Number(pnl).toFixed(2)}
                       </span>
                     </td>
 

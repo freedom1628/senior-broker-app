@@ -60,8 +60,25 @@ export const TradeDetailDrawer: React.FC<TradeDetailDrawerProps> = ({
       setSharesTotal((trade.sharesTotal || 0).toString());
       setCustomRealizedPnL(trade.realizedPnL !== undefined && trade.realizedPnL !== null ? trade.realizedPnL.toString() : "");
       setIsManualPnL(trade.realizedPnL !== undefined && trade.realizedPnL !== null);
-      setEntryDate(trade.entryDate ? new Date(trade.entryDate).toISOString().split("T")[0] : "");
-      setExitDate(trade.closedDate ? new Date(trade.closedDate).toISOString().split("T")[0] : "");
+
+      let safeEntryDate = "";
+      if (trade.entryDate) {
+        try {
+          const d = new Date(trade.entryDate);
+          if (!isNaN(d.getTime())) safeEntryDate = d.toISOString().split("T")[0];
+        } catch (e) {}
+      }
+      setEntryDate(safeEntryDate);
+
+      let safeExitDate = "";
+      if (trade.closedDate) {
+        try {
+          const d = new Date(trade.closedDate);
+          if (!isNaN(d.getTime())) safeExitDate = d.toISOString().split("T")[0];
+        } catch (e) {}
+      }
+      setExitDate(safeExitDate);
+
       setExitReason(trade.exitReason || "STOP_LOSS_EXECUTED");
       setNotesText(trade.notes || "");
       setIsEditing(false);

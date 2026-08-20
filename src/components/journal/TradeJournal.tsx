@@ -96,15 +96,18 @@ export const TradeJournal: React.FC<TradeJournalProps> = ({
         return true;
       })
       .sort((a, b) => {
+        const getTime = (t: Trade) => {
+          const d = t.closedDate || t.createdAt;
+          if (!d) return 0;
+          const time = new Date(d).getTime();
+          return isNaN(time) ? 0 : time;
+        };
+
         if (filters.sortBy === "DATE_DESC") {
-          const dateA = a.closedDate || a.createdAt || "";
-          const dateB = b.closedDate || b.createdAt || "";
-          return dateB.localeCompare(dateA);
+          return getTime(b) - getTime(a);
         }
         if (filters.sortBy === "DATE_ASC") {
-          const dateA = a.closedDate || a.createdAt || "";
-          const dateB = b.closedDate || b.createdAt || "";
-          return dateA.localeCompare(dateB);
+          return getTime(a) - getTime(b);
         }
         if (filters.sortBy === "PNL_DESC") {
           return (b.realizedPnL || 0) - (a.realizedPnL || 0);

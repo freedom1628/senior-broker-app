@@ -711,7 +711,6 @@ function DeskHome() {
         onTradeAdded={() => {
           loadTrades();
           loadDailyReport();
-          setActiveTab("POSITIONS");
         }}
         accountSize={accountSize}
         riskPerTrade={riskPerTrade}

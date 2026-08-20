@@ -59,15 +59,19 @@ export const PnLCurveChart: React.FC<PnLCurveChartProps> = ({
       },
     ];
 
-    // Sort trades chronologically by closedDate or createdAt
+    // Sort trades chronologically by closedDate or createdAt safely
     const sorted = [...closedTrades].sort((a, b) => {
-      const dateA = a.closedDate || a.createdAt || "";
-      const dateB = b.closedDate || b.createdAt || "";
-      return dateA.localeCompare(dateB);
+      const getTimestamp = (trade: Trade) => {
+        const d = trade.closedDate || trade.createdAt;
+        if (!d) return 0;
+        const time = new Date(d).getTime();
+        return isNaN(time) ? 0 : time;
+      };
+      return getTimestamp(a) - getTimestamp(b);
     });
 
     sorted.forEach((t, idx) => {
-      const pnl = t.realizedPnL ?? 0;
+      const pnl = typeof t.realizedPnL === "number" ? t.realizedPnL : 0;
       cumulativePnL += pnl;
       currentEquity += pnl;
       if (currentEquity > peak) {
@@ -80,14 +84,24 @@ export const PnLCurveChart: React.FC<PnLCurveChartProps> = ({
 
       const ddPct = peak > 0 ? (currentDrawdown / peak) * 100 : 0;
 
+      let formattedDate = `T${idx + 1}`;
+      if (t.closedDate) {
+        try {
+          const d = new Date(t.closedDate);
+          if (!isNaN(d.getTime())) {
+            formattedDate = d.toLocaleDateString([], { month: "short", day: "numeric" });
+          }
+        } catch (e) {}
+      }
+
       data.push({
         tradeIndex: idx + 1,
-        label: `#${idx + 1} ${t.ticker}`,
-        date: t.closedDate ? new Date(t.closedDate).toLocaleDateString([], { month: "short", day: "numeric" }) : `T${idx + 1}`,
+        label: `#${idx + 1} ${t.ticker || "TRADE"}`,
+        date: formattedDate,
         ticker: t.ticker,
         companyName: t.companyName,
         tradePnL: pnl,
-        tradeR: t.rMultiple ?? 0,
+        tradeR: typeof t.rMultiple === "number" ? t.rMultiple : 0,
         cumulativePnL: Number(cumulativePnL.toFixed(2)),
         totalEquity: Number(currentEquity.toFixed(2)),
         highWaterMark: Number(peak.toFixed(2)),
