@@ -16,6 +16,7 @@ import { ImportModal } from "@/components/dashboard/ImportModal";
 import { SettingsModal } from "@/components/dashboard/SettingsModal";
 import { AddTradeModal } from "@/components/dashboard/AddTradeModal";
 import { NotificationCenter } from "@/components/dashboard/NotificationCenter";
+import { OnboardingTourModal } from "@/components/dashboard/OnboardingTourModal";
 import { SignInView } from "@/components/auth/SignInView";
 import { DeskLockOverlay } from "@/components/auth/DeskLockOverlay";
 import { triggerNotificationAlert } from "@/lib/notifications/notification-service";
@@ -65,6 +66,17 @@ function DeskHome() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAddTradeOpen, setIsAddTradeOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [isTourOpen, setIsTourOpen] = useState(false);
+
+  // Check tour completion on first mount
+  useEffect(() => {
+    try {
+      const tourDone = localStorage.getItem("senior_broker_tour_completed");
+      if (!tourDone) {
+        setIsTourOpen(true);
+      }
+    } catch (e) {}
+  }, []);
 
   // 1. Fetch Research Data
   const loadResearch = useCallback(async () => {
@@ -405,6 +417,7 @@ function DeskHome() {
         onOpenNotifications={() => setIsNotificationsOpen(true)}
         onSignOut={logout}
         onLockDesk={lockDesk}
+        onOpenTour={() => setIsTourOpen(true)}
         unreadAlertsCount={unreadAlertsCount}
         marketQuotes={marketQuotes}
         onRefreshQuotes={pollMarketData}
@@ -414,6 +427,7 @@ function DeskHome() {
         currentUser={currentUser}
         activeTab={activeTab}
         onNavigateTab={(t) => setActiveTab(t)}
+        activeTrades={activeTrades}
       />
 
       {/* Main Content Container */}
@@ -747,6 +761,19 @@ function DeskHome() {
         onClose={() => setIsNotificationsOpen(false)}
         notifications={notifications}
         onMarkAllRead={handleMarkAllNotificationsRead}
+      />
+
+      {/* Apple-style Interactive Onboarding Walkthrough */}
+      <OnboardingTourModal
+        isOpen={isTourOpen}
+        onClose={(dontShowAgain) => {
+          setIsTourOpen(false);
+          if (dontShowAgain) {
+            try {
+              localStorage.setItem("senior_broker_tour_completed", "true");
+            } catch (e) {}
+          }
+        }}
       />
     </div>
   );

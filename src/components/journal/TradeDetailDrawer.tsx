@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Trade } from "@/lib/storage/types";
 import { PriceLadder } from "@/components/dashboard/PriceLadder";
 import {
@@ -14,12 +14,16 @@ import {
   Tag,
   Save,
   Check,
+  Edit3,
+  DollarSign,
+  AlertTriangle,
 } from "lucide-react";
 
 export interface TradeDetailDrawerProps {
   trade: Trade | null;
   isOpen: boolean;
   onClose: () => void;
+  onUpdateTrade?: (updatedTrade: Trade) => void;
   onUpdateNotes?: (tradeId: string, updatedNotes: string) => void;
 }
 
@@ -27,47 +31,113 @@ export const TradeDetailDrawer: React.FC<TradeDetailDrawerProps> = ({
   trade,
   isOpen,
   onClose,
+  onUpdateTrade,
   onUpdateNotes,
 }) => {
-  const [notesText, setNotesText] = useState(trade?.notes || "");
-  const [savedNotes, setSavedNotes] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [entryPrice, setEntryPrice] = useState("");
+  const [stopLoss, setStopLoss] = useState("");
+  const [exitPrice, setExitPrice] = useState("");
+  const [sharesTotal, setSharesTotal] = useState("");
+  const [entryDate, setEntryDate] = useState("");
+  const [exitDate, setExitDate] = useState("");
+  const [exitReason, setExitReason] = useState("STOP_LOSS_EXECUTED");
+  const [notesText, setNotesText] = useState("");
+  const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   // Sync state if trade changes
-  React.useEffect(() => {
+  useEffect(() => {
     if (trade) {
+      const entry = trade.actualEntry || trade.entryTrigger || 0;
+      const exit = trade.closedPrice || entry;
+      setEntryPrice(entry.toString());
+      setStopLoss((trade.initialStop || 0).toString());
+      setExitPrice(exit.toString());
+      setSharesTotal((trade.sharesTotal || 0).toString());
+      setEntryDate(trade.entryDate ? new Date(trade.entryDate).toISOString().split("T")[0] : "");
+      setExitDate(trade.closedDate ? new Date(trade.closedDate).toISOString().split("T")[0] : "");
+      setExitReason(trade.exitReason || "STOP_LOSS_EXECUTED");
       setNotesText(trade.notes || "");
+      setIsEditing(false);
     }
   }, [trade]);
 
   if (!isOpen || !trade) return null;
 
-  const entry = trade.actualEntry || trade.entryTrigger;
-  const exit = trade.closedPrice || entry;
-  const initialStop = trade.initialStop;
-  const riskPerShare = Math.max(0.01, Math.abs(entry - initialStop));
-  const plannedDollarRisk = trade.sharesTotal * riskPerShare;
-  const realized = trade.realizedPnL || 0;
-  const rMultiple = trade.rMultiple ?? Number((realized / plannedDollarRisk).toFixed(2));
-  const isWinner = realized > 0;
+  const currentEntry = parseFloat(entryPrice) || trade.actualEntry || trade.entryTrigger || 100;
+  const currentExit = parseFloat(exitPrice) || trade.closedPrice || currentEntry;
+  const currentStop = parseFloat(stopLoss) || trade.initialStop || 95;
+  const currentShares = parseInt(sharesTotal, 10) || trade.sharesTotal || 1;
 
-  const handleSaveNotes = () => {
-    if (onUpdateNotes) {
-      onUpdateNotes(trade.id, notesText);
-    }
-    // Also save to localStorage
+  const riskPerShare = Math.max(0.01, Math.abs(currentEntry - currentStop));
+  const plannedDollarRisk = currentShares * riskPerShare;
+  const calculatedRealized = Number(((currentExit - currentEntry) * currentShares).toFixed(2));
+  const calculatedRMultiple = Number(((currentExit - currentEntry) / riskPerShare).toFixed(2));
+  const isWinner = calculatedRealized > 0;
+
+  const handleSaveChanges = async () => {
+    setSaving(true);
     try {
-      const localTrades = JSON.parse(localStorage.getItem("senior_broker_custom_positions") || "[]");
-      const updated = localTrades.map((t: any) => (t.id === trade.id ? { ...t, notes: notesText } : t));
-      localStorage.setItem("senior_broker_custom_positions", JSON.stringify(updated));
-    } catch (e) {}
+      const updatedPayload: any = {
+        tradeId: trade.id,
+        actualEntry: currentEntry,
+        closedPrice: currentExit,
+        initialStop: currentStop,
+        currentStop: currentStop,
+        sharesTotal: currentShares,
+        entryDate: entryDate ? new Date(entryDate).toISOString() : trade.entryDate,
+        closedDate: exitDate ? new Date(exitDate).toISOString() : trade.closedDate,
+        exitReason: exitReason,
+        realizedPnL: calculatedRealized,
+        rMultiple: calculatedRMultiple,
+        notes: notesText.trim(),
+      };
 
-    setSavedNotes(true);
-    setTimeout(() => setSavedNotes(false), 2000);
+      // 1. Update on Server API
+      await fetch("/api/trades", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tradeId: trade.id,
+          action: "UPDATE_DETAILS",
+          ...updatedPayload,
+        }),
+      });
+
+      // 2. Update in Local Storage Vault
+      try {
+        const localTrades = JSON.parse(localStorage.getItem("senior_broker_custom_positions") || "[]");
+        const updated = localTrades.map((t: any) =>
+          t.id === trade.id
+            ? {
+                ...t,
+                ...updatedPayload,
+              }
+            : t
+        );
+        localStorage.setItem("senior_broker_custom_positions", JSON.stringify(updated));
+      } catch (e) {}
+
+      if (onUpdateTrade) {
+        onUpdateTrade({ ...trade, ...updatedPayload });
+      }
+
+      setSaved(true);
+      setTimeout(() => {
+        setSaved(false);
+        setSaving(false);
+        setIsEditing(false);
+      }, 1000);
+    } catch (err) {
+      setSaving(false);
+    }
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xl p-4 animate-in fade-in duration-150">
       <div className="w-full max-w-2xl rounded-3xl border border-white/10 bg-[#0E1322] p-6 sm:p-8 space-y-6 shadow-2xl overflow-y-auto max-h-[92vh]">
+        
         {/* Header */}
         <div className="flex items-start justify-between border-b border-white/[0.08] pb-4">
           <div>
@@ -82,10 +152,10 @@ export const TradeDetailDrawer: React.FC<TradeDetailDrawerProps> = ({
                     : "bg-rose-500/20 text-rose-300 border border-rose-500/30"
                 }`}
               >
-                {isWinner ? "+" : ""}${realized.toFixed(2)} ({isWinner ? "+" : ""}{rMultiple.toFixed(2)}R)
+                {isWinner ? "+" : ""}${calculatedRealized.toFixed(2)} ({isWinner ? "+" : ""}{calculatedRMultiple.toFixed(2)}R)
               </span>
               <span className="rounded-full bg-white/[0.06] px-2 py-0.5 text-[10px] text-neutral-400 font-mono">
-                {trade.exitReason || "CLOSED"}
+                {exitReason || trade.exitReason || "CLOSED"}
               </span>
             </div>
             <p className="text-xs text-neutral-400 font-sans mt-0.5">
@@ -93,46 +163,163 @@ export const TradeDetailDrawer: React.FC<TradeDetailDrawerProps> = ({
             </p>
           </div>
 
-          <button
-            onClick={onClose}
-            className="rounded-full p-1.5 text-neutral-400 hover:bg-white/[0.08] hover:text-white transition"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
+          <div className="flex items-center space-x-2">
+            <button
+              type="button"
+              onClick={() => setIsEditing(!isEditing)}
+              className="flex items-center space-x-1.5 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs text-neutral-300 hover:bg-white/[0.08] transition"
+            >
+              <Edit3 className="h-3.5 w-3.5" />
+              <span>{isEditing ? "View Mode" : "Edit Details"}</span>
+            </button>
 
-        {/* Section 1: Planned vs Actual Performance */}
-        <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4 space-y-3 font-mono text-xs">
-          <span className="text-[11px] uppercase tracking-wider text-sky-400 font-bold block">
-            Planned Risk vs Actual Outcome
-          </span>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div>
-              <span className="text-neutral-500 block text-[10px] uppercase">Planned Risk</span>
-              <span className="text-white font-bold">${plannedDollarRisk.toFixed(2)}</span>
-              <span className="text-neutral-500 block text-[10px]">({trade.sharesTotal} sh @ ${riskPerShare.toFixed(2)}/sh)</span>
-            </div>
-            <div>
-              <span className="text-neutral-500 block text-[10px] uppercase">Planned R:R</span>
-              <span className="text-white font-bold">{trade.rrRatio?.toFixed(2) || "2.00"} : 1</span>
-              <span className="text-neutral-500 block text-[10px]">(Target 1)</span>
-            </div>
-            <div>
-              <span className="text-neutral-500 block text-[10px] uppercase">Actual Fill / Exit</span>
-              <span className="text-white font-bold">${entry.toFixed(2)} → ${exit.toFixed(2)}</span>
-              <span className="text-neutral-500 block text-[10px]">({trade.sessionsElapsed || 0} sessions held)</span>
-            </div>
-            <div>
-              <span className="text-neutral-500 block text-[10px] uppercase">Final Campaign Return</span>
-              <span className={`font-bold ${isWinner ? "text-emerald-400" : "text-rose-400"}`}>
-                {isWinner ? "+" : ""}${realized.toFixed(2)}
-              </span>
-              <span className="text-purple-300 font-bold block text-[10px]">
-                {isWinner ? "+" : ""}{rMultiple.toFixed(2)} R
-              </span>
-            </div>
+            <button
+              onClick={onClose}
+              className="rounded-full p-1.5 text-neutral-400 hover:bg-white/[0.08] hover:text-white transition"
+            >
+              <X className="h-5 w-5" />
+            </button>
           </div>
         </div>
+
+        {/* EDIT FORM (When editing mode active) */}
+        {isEditing ? (
+          <div className="space-y-4 rounded-2xl border border-sky-500/30 bg-sky-500/[0.03] p-4 font-mono text-xs">
+            <div className="flex items-center space-x-2 text-sky-300 font-bold uppercase">
+              <Edit3 className="h-4 w-4" />
+              <span>Edit Closed Position Details</span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div>
+                <label className="block text-[10px] text-neutral-400 uppercase mb-1">Entry Price ($)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={entryPrice}
+                  onChange={(e) => setEntryPrice(e.target.value)}
+                  className="w-full rounded-xl border border-white/10 bg-black/50 px-2.5 py-1.5 text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-rose-400 uppercase mb-1">Stop Loss ($)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={stopLoss}
+                  onChange={(e) => setStopLoss(e.target.value)}
+                  className="w-full rounded-xl border border-white/10 bg-black/50 px-2.5 py-1.5 text-rose-300"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-purple-400 uppercase mb-1">Exit / Sold ($)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={exitPrice}
+                  onChange={(e) => setExitPrice(e.target.value)}
+                  className="w-full rounded-xl border border-purple-500/30 bg-black/50 px-2.5 py-1.5 text-purple-300"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-neutral-400 uppercase mb-1">Shares Total</label>
+                <input
+                  type="number"
+                  value={sharesTotal}
+                  onChange={(e) => setSharesTotal(e.target.value)}
+                  className="w-full rounded-xl border border-white/10 bg-black/50 px-2.5 py-1.5 text-white"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-[10px] text-neutral-400 uppercase mb-1">Entry Date</label>
+                <input
+                  type="date"
+                  value={entryDate}
+                  onChange={(e) => setEntryDate(e.target.value)}
+                  className="w-full rounded-xl border border-white/10 bg-black/50 px-2.5 py-1.5 text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-neutral-400 uppercase mb-1">Exit Date</label>
+                <input
+                  type="date"
+                  value={exitDate}
+                  onChange={(e) => setExitDate(e.target.value)}
+                  className="w-full rounded-xl border border-white/10 bg-black/50 px-2.5 py-1.5 text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-neutral-400 uppercase mb-1">Exit Reason</label>
+                <select
+                  value={exitReason}
+                  onChange={(e) => setExitReason(e.target.value)}
+                  className="w-full rounded-xl border border-white/10 bg-black/50 px-2 py-1.5 text-xs text-white"
+                >
+                  <option value="STOP_LOSS_EXECUTED">Stop Loss Hit (Stopped Out)</option>
+                  <option value="TARGET_1_HIT">Target 1 Reached (50% Scale)</option>
+                  <option value="TARGET_2_HIT">Target 2 Reached (Full Profit)</option>
+                  <option value="TIME_STOP_EXIT">Time Stop Exit (Momentum Stalled)</option>
+                  <option value="MANUAL_EXIT">Manual Discretionary Exit</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Recalculated P&L Preview */}
+            <div className="rounded-xl border border-white/10 bg-black/40 p-3 flex items-center justify-between text-xs">
+              <span>Recalculated Return: <strong className={isWinner ? "text-emerald-400" : "text-rose-400"}>{isWinner ? "+" : ""}${calculatedRealized.toFixed(2)} ({calculatedRMultiple.toFixed(2)}R)</strong></span>
+              <button
+                type="button"
+                onClick={handleSaveChanges}
+                disabled={saving}
+                className="flex items-center space-x-1.5 rounded-full bg-emerald-500 px-4 py-1.5 text-xs font-semibold text-white shadow hover:bg-emerald-400 transition"
+              >
+                {saved ? <Check className="h-3.5 w-3.5" /> : <Save className="h-3.5 w-3.5" />}
+                <span>{saved ? "Saved!" : saving ? "Saving..." : "Save Details"}</span>
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* VIEW MODE */
+          <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4 space-y-3 font-mono text-xs">
+            <span className="text-[11px] uppercase tracking-wider text-sky-400 font-bold block">
+              Planned Risk vs Actual Outcome
+            </span>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div>
+                <span className="text-neutral-500 block text-[10px] uppercase">Planned Risk</span>
+                <span className="text-white font-bold">${plannedDollarRisk.toFixed(2)}</span>
+                <span className="text-neutral-500 block text-[10px]">({currentShares} sh @ ${riskPerShare.toFixed(2)}/sh)</span>
+              </div>
+              <div>
+                <span className="text-neutral-500 block text-[10px] uppercase">Planned R:R</span>
+                <span className="text-white font-bold">{trade.rrRatio?.toFixed(2) || "2.00"} : 1</span>
+                <span className="text-neutral-500 block text-[10px]">(Target 1)</span>
+              </div>
+              <div>
+                <span className="text-neutral-500 block text-[10px] uppercase">Actual Fill / Exit</span>
+                <span className="text-white font-bold">${currentEntry.toFixed(2)} → ${currentExit.toFixed(2)}</span>
+                <span className="text-neutral-500 block text-[10px]">({trade.closedDate ? new Date(trade.closedDate).toLocaleDateString() : "Closed"})</span>
+              </div>
+              <div>
+                <span className="text-neutral-500 block text-[10px] uppercase">Final Campaign Return</span>
+                <span className={`font-bold ${isWinner ? "text-emerald-400" : "text-rose-400"}`}>
+                  {isWinner ? "+" : ""}${calculatedRealized.toFixed(2)}
+                </span>
+                <span className="text-purple-300 font-bold block text-[10px]">
+                  {isWinner ? "+" : ""}{calculatedRMultiple.toFixed(2)} R
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Section 2: Visual 4-Tier Price Ladder at Exit */}
         <div className="space-y-2">
@@ -140,87 +327,50 @@ export const TradeDetailDrawer: React.FC<TradeDetailDrawerProps> = ({
             Execution Price Ladder:
           </span>
           <PriceLadder
-            entryTrigger={entry}
-            stopLoss={trade.initialStop}
+            entryTrigger={currentEntry}
+            stopLoss={currentStop}
             target1={trade.target1}
             target2={trade.target2}
-            currentPrice={exit}
-            positionShares={trade.sharesTotal}
+            currentPrice={currentExit}
+            positionShares={currentShares}
             variant="full"
             showSizingBar={false}
           />
         </div>
 
-        {/* Section 3: Discipline & Post-Mortem Checklist */}
-        <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4 space-y-2.5">
-          <span className="text-[11px] font-mono uppercase text-emerald-400 font-bold flex items-center space-x-1.5">
-            <ShieldCheck className="h-4 w-4" />
-            <span>Discipline &amp; Rules Audit</span>
-          </span>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-neutral-300 font-mono">
-            <div className="flex items-center space-x-2">
-              <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
-              <span>Hard stop respected without widening</span>
-            </div>
-            <div className="flex items-center space-x-2">
-              <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
-              <span>Position sized strictly $\le$ 1% risk</span>
-            </div>
-            <div className="flex items-center space-x-2">
-              <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
-              <span>Scaled 50% at Target 1 &amp; raised stop</span>
-            </div>
-            <div className="flex items-center space-x-2">
-              <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
-              <span>Exited within 5–7 session window</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Section 4: Editable Reflections & Trade Notes */}
+        {/* Section 3: Notes & Trade Post-Mortem */}
         <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-mono uppercase text-neutral-400">
-              Post-Mortem Lessons &amp; Reflections
-            </label>
-            {savedNotes && (
-              <span className="text-[11px] font-mono text-emerald-400 flex items-center space-x-1">
-                <Check className="h-3 w-3" />
-                <span>Notes Saved</span>
-              </span>
-            )}
-          </div>
+          <label className="block text-xs font-mono uppercase text-neutral-400">
+            Campaign Post-Mortem &amp; Notes
+          </label>
           <textarea
             rows={3}
             value={notesText}
             onChange={(e) => setNotesText(e.target.value)}
-            placeholder="Record post-trade psychological reflections, catalyst follow-through observations, and improvements for future campaigns..."
-            className="w-full rounded-2xl border border-white/10 bg-black/50 p-3.5 text-xs text-neutral-200 focus:outline-none focus:border-sky-500 font-sans"
+            placeholder="Document catalysts, lessons learned, or reason for early exit..."
+            className="w-full rounded-2xl border border-white/10 bg-black/40 p-3.5 font-mono text-xs text-neutral-200 focus:outline-none focus:border-sky-500"
           />
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-between pt-2 border-t border-white/[0.06]">
-          <button
-            type="button"
-            onClick={handleSaveNotes}
-            className="flex items-center space-x-1.5 rounded-full border border-sky-500/30 bg-sky-500/10 px-4 py-2 text-xs font-semibold text-sky-300 hover:bg-sky-500/20 transition"
-          >
-            <Save className="h-3.5 w-3.5" />
-            <span>Save Reflection</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full bg-white px-5 py-2 text-xs font-semibold text-neutral-900 shadow hover:bg-neutral-100 transition"
-          >
-            Done
-          </button>
+          <div className="flex justify-end pt-1">
+            <button
+              onClick={handleSaveChanges}
+              disabled={saving}
+              className="flex items-center space-x-1.5 rounded-full bg-white px-4 py-1.5 text-xs font-semibold text-neutral-900 shadow hover:bg-neutral-100 transition active:scale-95 disabled:opacity-50"
+            >
+              {saved ? (
+                <>
+                  <Check className="h-3.5 w-3.5 text-emerald-600" />
+                  <span>Saved!</span>
+                </>
+              ) : (
+                <>
+                  <Save className="h-3.5 w-3.5 text-neutral-700" />
+                  <span>Save Notes &amp; History</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </div>
     </div>
   );
 };
-
-export default TradeDetailDrawer;

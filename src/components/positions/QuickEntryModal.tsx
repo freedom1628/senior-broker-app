@@ -18,6 +18,10 @@ import {
   TrendingUp,
   Sliders,
   AlertTriangle,
+  Calendar,
+  DollarSign,
+  History,
+  CheckCircle2,
 } from "lucide-react";
 
 export interface QuickEntryModalProps {
@@ -44,7 +48,7 @@ export const QuickEntryModal: React.FC<QuickEntryModalProps> = ({
   const [ticker, setTicker] = useState("");
   const [companyName, setCompanyName] = useState("");
   const [sector, setSector] = useState("Technology");
-  const [status, setStatus] = useState<"ACTIVE" | "PENDING_ENTRY">("ACTIVE");
+  const [status, setStatus] = useState<"ACTIVE" | "PENDING_ENTRY" | "CLOSED">("ACTIVE");
   const [setupType, setSetupType] = useState("Catalyst Continuation");
   const [entryPrice, setEntryPrice] = useState("");
   const [stopLoss, setStopLoss] = useState("");
@@ -57,6 +61,12 @@ export const QuickEntryModal: React.FC<QuickEntryModalProps> = ({
   const [isManualShares, setIsManualShares] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  // Fields for Closed / Historical Positions
+  const [entryDate, setEntryDate] = useState(new Date().toISOString().split("T")[0]);
+  const [exitDate, setExitDate] = useState(new Date().toISOString().split("T")[0]);
+  const [exitPrice, setExitPrice] = useState("");
+  const [exitReason, setExitReason] = useState("STOP_LOSS_EXECUTED");
 
   // Pre-fill from initialCandidate if supplied
   useEffect(() => {
@@ -81,6 +91,8 @@ export const QuickEntryModal: React.FC<QuickEntryModalProps> = ({
   const parsedT1 = parseFloat(target1) || undefined;
   const parsedT2 = parseFloat(target2) || undefined;
   const parsedAtr = parseFloat(atr) || undefined;
+  const parsedExit = parseFloat(exitPrice) || 0;
+  const parsedShares = parseInt(shares, 10) || 0;
 
   // Real-time Reactive Sizing calculation
   const sizingResult: SizingResult | null = useMemo(() => {
@@ -99,170 +111,156 @@ export const QuickEntryModal: React.FC<QuickEntryModalProps> = ({
     });
   }, [accountSize, riskPerTrade, parsedEntry, parsedStop, parsedAtr, parsedT1, parsedT2, availableCash]);
 
-  // Auto-sync calculated shares if not manually overridden
+  // Auto-fill shares, target1, target2 when sizingResult updates (if not manually overridden)
   useEffect(() => {
-    if (!isManualShares && sizingResult && sizingResult.isValid && sizingResult.shares > 0) {
+    if (sizingResult && !isManualShares && status !== "CLOSED") {
       setShares(sizingResult.shares.toString());
-      if (!target1 && sizingResult.target1 > 0) {
+      if (!target1 && sizingResult.target1) {
         setTarget1(sizingResult.target1.toFixed(2));
       }
-      if (!target2 && sizingResult.target2 > 0) {
+      if (!target2 && sizingResult.target2) {
         setTarget2(sizingResult.target2.toFixed(2));
       }
     }
-  }, [sizingResult, isManualShares, target1, target2]);
+  }, [sizingResult, isManualShares, target1, target2, status]);
 
-  // Pre-trade Guardrail Validation
-  const guardrailCheck: PortfolioRuleCheckResult | null = useMemo(() => {
-    if (!ticker || parsedEntry <= 0 || parsedStop <= 0) return null;
-    const currentShares = parseInt(shares, 10) || sizingResult?.shares || 1;
-    const riskPerShare = Math.max(0.01, parsedEntry - parsedStop);
-    const dollarRisk = currentShares * riskPerShare;
+  // For CLOSED positions, compute realized P&L and R-multiple
+  const calculatedRealizedPnL = useMemo(() => {
+    if (status !== "CLOSED" || parsedEntry <= 0 || parsedExit <= 0 || parsedShares <= 0) return 0;
+    return Number(((parsedExit - parsedEntry) * parsedShares).toFixed(2));
+  }, [status, parsedEntry, parsedExit, parsedShares]);
 
+  const calculatedRMultiple = useMemo(() => {
+    if (status !== "CLOSED" || parsedEntry <= 0 || parsedStop <= 0 || parsedEntry === parsedStop) return 0;
+    const riskPerShare = Math.abs(parsedEntry - parsedStop);
+    return Number(((parsedExit - parsedEntry) / riskPerShare).toFixed(2));
+  }, [status, parsedEntry, parsedStop, parsedExit]);
+
+  // Rule Guardrail Validation for proposed trade
+  const ruleCheck: PortfolioRuleCheckResult | null = useMemo(() => {
+    if (status === "CLOSED" || parsedEntry <= 0 || parsedStop <= 0 || parsedShares <= 0) return null;
     return validateProposedTrade(
       {
-        ticker,
-        companyName,
-        sector,
+        ticker: ticker.toUpperCase(),
         entryPrice: parsedEntry,
         stopLoss: parsedStop,
-        shares: currentShares,
-        dollarRisk,
+        shares: parsedShares,
+        sector,
       },
       {
         accountSize,
-        trades: activeTrades as any,
+        trades: activeTrades,
       }
     );
-  }, [ticker, companyName, sector, parsedEntry, parsedStop, shares, sizingResult, accountSize, activeTrades]);
+  }, [status, ticker, parsedEntry, parsedStop, parsedShares, sector, accountSize, activeTrades]);
 
-  // Quick Preset Handlers (<15s flow)
-  const applyPresetStop = (pct: number) => {
-    if (parsedEntry <= 0) return;
-    const calculatedStop = Number((parsedEntry * (1 - pct / 100)).toFixed(2));
-    setStopLoss(calculatedStop.toString());
-    setIsManualShares(false);
-  };
-
-  const applyAtrStop = () => {
-    if (parsedEntry <= 0) return;
-    const estimatedAtr = parsedAtr || Number((parsedEntry * 0.035).toFixed(2));
-    const calculatedStop = Number((parsedEntry - estimatedAtr * 2.0).toFixed(2));
-    setStopLoss(calculatedStop.toString());
-    setIsManualShares(false);
-  };
+  if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!ticker.trim() || parsedEntry <= 0 || parsedStop <= 0) {
-      setError("Please provide a valid Ticker, Entry Price, and Hard Stop Loss.");
-      return;
-    }
-
-    if (parsedStop >= parsedEntry) {
-      setError("Discipline Rule: Hard Stop Loss must be strictly below Entry Price for long swing trades.");
-      return;
-    }
-
-    const finalShares = Math.max(1, parseInt(shares, 10) || (sizingResult?.shares ?? 1));
-    const riskPerShare = Math.max(0.01, parsedEntry - parsedStop);
-    const finalT1 = parsedT1 || Number((parsedEntry + 2.0 * riskPerShare).toFixed(2));
-    const finalT2 = parsedT2 || Number((parsedEntry + 3.5 * riskPerShare).toFixed(2));
-    const rrRatio = Number(((finalT1 - parsedEntry) / riskPerShare).toFixed(2));
-
-    setLoading(true);
     setError("");
 
-    const newTradePayload = {
-      id: `local-trade-${Date.now()}`,
-      ticker: ticker.toUpperCase().trim(),
-      companyName: companyName.trim() || `${ticker.toUpperCase().trim()} Inc.`,
-      sector: sector.trim() || "Technology",
-      status,
-      setupType,
-      entryTrigger: parsedEntry,
-      actualEntry: status === "ACTIVE" ? parsedEntry : undefined,
-      entryDate: status === "ACTIVE" ? new Date().toISOString() : undefined,
-      sharesTotal: finalShares,
-      sharesRemaining: finalShares,
-      initialStop: parsedStop,
-      currentStop: parsedStop,
-      target1: finalT1,
-      target2: finalT2,
-      rrRatio,
-      timeStopSessions: parseInt(timeStopSessions, 10) || 6,
-      sessionsElapsed: 0,
-      notes: notes.trim() || undefined,
-      createdAt: new Date().toISOString(),
-    };
+    const sym = ticker.toUpperCase().trim();
+    if (!sym) {
+      setError("Please specify a ticker symbol.");
+      return;
+    }
+    if (parsedEntry <= 0) {
+      setError("Valid entry price required.");
+      return;
+    }
+    if (parsedStop <= 0) {
+      setError("Stop loss price required.");
+      return;
+    }
+    if (parsedShares <= 0) {
+      setError("Total shares must be greater than zero.");
+      return;
+    }
+    if (status === "CLOSED" && parsedExit <= 0) {
+      setError("Please provide the exit / sold price for closed position.");
+      return;
+    }
 
+    setLoading(true);
     try {
-      // POST to server route
+      const riskPerShare = Math.max(0.01, Math.abs(parsedEntry - parsedStop));
+      const target1Val = parsedT1 || Number((parsedEntry + 2 * riskPerShare).toFixed(2));
+      const target2Val = parsedT2 || Number((parsedEntry + 3.5 * riskPerShare).toFixed(2));
+      const calculatedRR = Number(((target1Val - parsedEntry) / riskPerShare).toFixed(2));
+
+      const payload: any = {
+        ticker: sym,
+        companyName: companyName.trim() || `${sym} Corporation`,
+        sector,
+        setupType,
+        status,
+        entryTrigger: parsedEntry,
+        actualEntry: parsedEntry,
+        entryDate: entryDate ? new Date(entryDate).toISOString() : new Date().toISOString(),
+        sharesTotal: parsedShares,
+        sharesRemaining: status === "CLOSED" ? 0 : parsedShares,
+        initialStop: parsedStop,
+        currentStop: parsedStop,
+        target1: target1Val,
+        target2: target2Val,
+        rrRatio: calculatedRR,
+        timeStopSessions: parseInt(timeStopSessions, 10) || 6,
+        notes: notes.trim(),
+      };
+
+      if (status === "CLOSED") {
+        payload.closedDate = exitDate ? new Date(exitDate).toISOString() : new Date().toISOString();
+        payload.closedPrice = parsedExit;
+        payload.exitReason = exitReason;
+        payload.realizedPnL = calculatedRealizedPnL;
+        payload.rMultiple = calculatedRMultiple;
+      }
+
+      // 1. Post to Server API
       await fetch("/api/trades", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newTradePayload),
+        body: JSON.stringify(payload),
       });
 
-      // Synchronously backup to localStorage
+      // 2. Dual-Persist to Local Storage
       try {
-        const localTrades = JSON.parse(localStorage.getItem("senior_broker_custom_positions") || "[]");
-        localTrades.unshift(newTradePayload);
+        const localTrades: any[] = JSON.parse(localStorage.getItem("senior_broker_custom_positions") || "[]");
+        const newTradeObj = {
+          ...payload,
+          id: `custom-trade-${Date.now()}`,
+          createdAt: new Date().toISOString(),
+        };
+        localTrades.push(newTradeObj);
         localStorage.setItem("senior_broker_custom_positions", JSON.stringify(localTrades));
-      } catch (e) {}
+      } catch (err) {}
 
-      playEntryTriggered();
       onTradeAdded();
       onClose();
-
-      // Reset form
-      setTicker("");
-      setCompanyName("");
-      setEntryPrice("");
-      setStopLoss("");
-      setTarget1("");
-      setTarget2("");
-      setShares("");
-      setNotes("");
-      setIsManualShares(false);
     } catch (err: any) {
-      // Fallback to local storage if network route has edge issue
-      try {
-        const localTrades = JSON.parse(localStorage.getItem("senior_broker_custom_positions") || "[]");
-        localTrades.unshift(newTradePayload);
-        localStorage.setItem("senior_broker_custom_positions", JSON.stringify(localTrades));
-      } catch (e) {}
-
-      playEntryTriggered();
-      onTradeAdded();
-      onClose();
+      setError(err?.message || "Failed to log trade.");
     } finally {
       setLoading(false);
     }
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xl p-4 animate-in fade-in duration-200">
-      <div className="w-full max-w-2xl rounded-3xl border border-white/10 bg-[#0E121D] p-6 sm:p-8 space-y-6 shadow-2xl overflow-y-auto max-h-[92vh]">
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-white/[0.06] pb-4">
-          <div className="flex items-center space-x-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-600 shadow-lg shadow-emerald-500/20">
-              <PlusCircle className="h-5 w-5 text-white" />
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xl p-4 animate-in fade-in duration-150">
+      <div className="w-full max-w-2xl rounded-3xl border border-white/10 bg-[#0E1322] p-6 sm:p-8 space-y-6 shadow-2xl overflow-y-auto max-h-[92vh]">
+        
+        {/* Header & 3-Mode Selector */}
+        <div className="flex items-start justify-between border-b border-white/[0.08] pb-4">
+          <div>
+            <div className="flex items-center space-x-2">
+              <span className="flex h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-sky-400">
+                Senior Broker Position Desk
+              </span>
             </div>
-            <div>
-              <h3 className="text-lg font-semibold text-white flex items-center space-x-2">
-                <span>Fast Trade &amp; Watch Order Entry</span>
-                <span className="rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[10px] font-mono text-emerald-400 font-bold">
-                  &lt;15s Flow
-                </span>
-              </h3>
-              <p className="text-xs text-neutral-400 font-mono">
-                Automated 1% account risk sizing ($150 on ${accountSize.toLocaleString()}) with 4-tier execution ladders
-              </p>
-            </div>
+            <h2 className="text-xl font-bold tracking-tight text-white mt-1">
+              Log Position &amp; History
+            </h2>
           </div>
           <button
             onClick={onClose}
@@ -272,347 +270,313 @@ export const QuickEntryModal: React.FC<QuickEntryModalProps> = ({
           </button>
         </div>
 
-        {/* Pre-Trade Guardrail Gatekeeper Banner */}
-        {guardrailCheck && (
-          <div
-            className={`rounded-2xl border p-3.5 text-xs font-mono flex items-start space-x-2.5 ${
-              !guardrailCheck.isAllowed
-                ? "border-rose-500/40 bg-rose-500/[0.08] text-rose-200"
-                : guardrailCheck.warnings.length > 0
-                ? "border-amber-500/40 bg-amber-500/[0.08] text-amber-200"
-                : "border-emerald-500/40 bg-emerald-500/[0.08] text-emerald-200"
+        {/* 3-Mode Tabs */}
+        <div className="grid grid-cols-3 gap-2 rounded-2xl bg-black/40 p-1.5 border border-white/[0.06]">
+          <button
+            type="button"
+            onClick={() => setStatus("ACTIVE")}
+            className={`flex items-center justify-center space-x-1.5 rounded-xl py-2 text-xs font-semibold transition ${
+              status === "ACTIVE"
+                ? "bg-emerald-500 text-white shadow-md"
+                : "text-neutral-400 hover:text-white"
             }`}
           >
-            {!guardrailCheck.isAllowed ? (
-              <ShieldAlert className="h-4 w-4 text-rose-400 shrink-0 mt-0.5" />
-            ) : guardrailCheck.warnings.length > 0 ? (
-              <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
-            ) : (
-              <ShieldCheck className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
-            )}
-            <div className="flex-1">
-              <span className="font-bold block">
-                {!guardrailCheck.isAllowed
-                  ? `Order Blocked: ${guardrailCheck.blockReason}`
-                  : "Institutional Guardrails Passed"}
-              </span>
-              <span className="text-[11px] opacity-80">
-                Sleeve Risk: ${guardrailCheck.projectedOpenRiskDollars.toFixed(2)} ({guardrailCheck.projectedOpenRiskPct.toFixed(2)}% of 3.0% cap) • Active: {guardrailCheck.currentActiveCount + (status === "ACTIVE" ? 1 : 0)}/3 Max
-              </span>
-            </div>
+            <TrendingUp className="h-3.5 w-3.5" />
+            <span>Active Holding</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setStatus("PENDING_ENTRY")}
+            className={`flex items-center justify-center space-x-1.5 rounded-xl py-2 text-xs font-semibold transition ${
+              status === "PENDING_ENTRY"
+                ? "bg-sky-500 text-white shadow-md"
+                : "text-neutral-400 hover:text-white"
+            }`}
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            <span>Pending Watch</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setStatus("CLOSED")}
+            className={`flex items-center justify-center space-x-1.5 rounded-xl py-2 text-xs font-semibold transition ${
+              status === "CLOSED"
+                ? "bg-purple-500 text-white shadow-md"
+                : "text-neutral-400 hover:text-white"
+            }`}
+          >
+            <History className="h-3.5 w-3.5" />
+            <span>Past Closed Move</span>
+          </button>
+        </div>
+
+        {error && (
+          <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300 flex items-center space-x-2">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            <span>{error}</span>
           </div>
         )}
 
-        {/* Entry Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Status Mode Toggle */}
-          <div className="flex rounded-2xl bg-black/40 p-1 border border-white/[0.06]">
-            <button
-              type="button"
-              onClick={() => setStatus("ACTIVE")}
-              className={`flex-1 py-2 text-xs font-semibold rounded-xl transition ${
-                status === "ACTIVE"
-                  ? "bg-emerald-500 text-white shadow"
-                  : "text-neutral-400 hover:text-white"
-              }`}
-            >
-              Active Open Position (Holding Now)
-            </button>
-            <button
-              type="button"
-              onClick={() => setStatus("PENDING_ENTRY")}
-              className={`flex-1 py-2 text-xs font-semibold rounded-xl transition ${
-                status === "PENDING_ENTRY"
-                  ? "bg-sky-500 text-white shadow"
-                  : "text-neutral-400 hover:text-white"
-              }`}
-            >
-              Pending Watch Order (Breakout Trigger)
-            </button>
-          </div>
-
-          {/* Row 1: Ticker, Company & Sector */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          
+          {/* Row 1: Symbol & Company */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-mono uppercase text-neutral-400 mb-1">
                 Ticker Symbol *
               </label>
               <input
                 type="text"
-                required
-                autoFocus
-                placeholder="e.g. GLBE, ATRO"
+                placeholder="e.g. NVDA, GLBE, ATRO"
                 value={ticker}
-                onChange={(e) => setTicker(e.target.value.toUpperCase().trim())}
-                className="w-full rounded-xl border border-white/10 bg-black/50 px-3.5 py-2.5 font-mono text-sm text-white focus:outline-none focus:border-emerald-500 uppercase"
+                onChange={(e) => setTicker(e.target.value.toUpperCase())}
+                required
+                className="w-full rounded-xl border border-white/10 bg-black/50 px-3.5 py-2 font-mono text-sm font-bold text-white uppercase tracking-wider focus:outline-none focus:border-sky-500"
               />
             </div>
 
             <div>
               <label className="block text-xs font-mono uppercase text-neutral-400 mb-1">
-                Company Name
+                Company Name / Sector
               </label>
               <input
                 type="text"
-                placeholder="e.g. Global-e Online"
+                placeholder="e.g. NVIDIA Corp"
                 value={companyName}
                 onChange={(e) => setCompanyName(e.target.value)}
-                className="w-full rounded-xl border border-white/10 bg-black/50 px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-mono uppercase text-neutral-400 mb-1">
-                Sector / Industry
-              </label>
-              <select
-                value={sector}
-                onChange={(e) => setSector(e.target.value)}
-                className="w-full rounded-xl border border-white/10 bg-black/50 px-3.5 py-2.5 font-mono text-xs text-white focus:outline-none focus:border-emerald-500"
-              >
-                <option value="Technology">Technology</option>
-                <option value="Consumer Discretionary">Consumer Discretionary</option>
-                <option value="Industrials">Industrials / Aerospace</option>
-                <option value="Healthcare">Healthcare / Biotech</option>
-                <option value="Financials">Financials</option>
-                <option value="Energy">Energy / Materials</option>
-                <option value="Diversified">Diversified</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Row 2: Setup Style Pills */}
-          <div>
-            <label className="block text-xs font-mono uppercase text-neutral-400 mb-1.5">
-              Setup Pattern Style
-            </label>
-            <div className="flex flex-wrap gap-2">
-              {[
-                "Catalyst Continuation",
-                "Post-Earnings Pullback",
-                "Base Breakout",
-                "High-Tight Flag",
-              ].map((style) => (
-                <button
-                  key={style}
-                  type="button"
-                  onClick={() => setSetupType(style)}
-                  className={`rounded-full px-3 py-1 text-xs font-mono transition ${
-                    setupType === style
-                      ? "bg-sky-500/20 border border-sky-500/40 text-sky-300 font-semibold"
-                      : "bg-white/[0.04] border border-white/[0.06] text-neutral-400 hover:text-white"
-                  }`}
-                >
-                  {style}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Row 3: Entry Price & Stop Loss with Presets */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-mono uppercase text-neutral-400 mb-1">
-                {status === "ACTIVE" ? "Entry / Fill Price ($) *" : "Breakout Trigger Price ($) *"}
-              </label>
-              <input
-                type="number"
-                step="0.01"
-                required
-                placeholder="42.30"
-                value={entryPrice}
-                onChange={(e) => {
-                  setEntryPrice(e.target.value);
-                  setIsManualShares(false);
-                }}
-                className="w-full rounded-xl border border-white/10 bg-black/50 px-3.5 py-2.5 font-mono text-sm text-white focus:outline-none focus:border-emerald-500"
-              />
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="block text-xs font-mono uppercase text-rose-400">
-                  Hard Stop Loss ($) *
-                </label>
-                <div className="flex items-center space-x-1.5 text-[10px] font-mono">
-                  <span className="text-neutral-500">Presets:</span>
-                  <button
-                    type="button"
-                    onClick={() => applyPresetStop(5)}
-                    className="text-sky-400 hover:underline"
-                  >
-                    5% Pivot
-                  </button>
-                  <span className="text-neutral-600">•</span>
-                  <button
-                    type="button"
-                    onClick={() => applyPresetStop(8)}
-                    className="text-sky-400 hover:underline"
-                  >
-                    8% Swing
-                  </button>
-                  <span className="text-neutral-600">•</span>
-                  <button
-                    type="button"
-                    onClick={applyAtrStop}
-                    className="text-emerald-400 hover:underline"
-                  >
-                    2x ATR
-                  </button>
-                </div>
-              </div>
-              <input
-                type="number"
-                step="0.01"
-                required
-                placeholder="40.20"
-                value={stopLoss}
-                onChange={(e) => {
-                  setStopLoss(e.target.value);
-                  setIsManualShares(false);
-                }}
-                className="w-full rounded-xl border border-rose-500/30 bg-black/50 px-3.5 py-2.5 font-mono text-sm text-rose-300 focus:outline-none focus:border-rose-500"
+                className="w-full rounded-xl border border-white/10 bg-black/50 px-3.5 py-2 text-sm text-neutral-200 focus:outline-none focus:border-sky-500"
               />
             </div>
           </div>
 
-          {/* Row 4: Reactive Sizing Bar */}
-          <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-mono uppercase tracking-wider text-sky-400 flex items-center space-x-1.5">
-                <Calculator className="h-3.5 w-3.5" />
-                <span>1% Risk Model ($150 Risk on ${accountSize.toLocaleString()})</span>
-              </span>
-              {sizingResult && (
-                <span className="text-[10px] font-mono rounded-md bg-white/[0.06] px-2 py-0.5 text-neutral-300">
-                  Limit: {sizingResult.limitingFactor}
-                </span>
-              )}
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs text-neutral-400 mb-1">
-                  Share Count (Whole Shares) *
-                </label>
-                <input
-                  type="number"
-                  step="1"
-                  required
-                  placeholder="e.g. 74"
-                  value={shares}
-                  onChange={(e) => {
-                    setShares(e.target.value);
-                    setIsManualShares(true);
-                  }}
-                  className="w-full rounded-xl border border-white/10 bg-black/50 px-3.5 py-2 font-mono text-sm text-white focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-
-              <div className="flex flex-col justify-center text-xs font-mono text-neutral-400 space-y-1">
-                <div>
-                  Capital Allocated:{" "}
-                  <span className="text-white font-bold">
-                    ${((parseInt(shares, 10) || 0) * parsedEntry).toFixed(2)}
-                  </span>
-                </div>
-                <div>
-                  Trade Risk:{" "}
-                  <span className="text-amber-400 font-bold">
-                    ${((parseInt(shares, 10) || 0) * Math.max(0, parsedEntry - parsedStop)).toFixed(2)}
-                  </span>{" "}
-                  ({(
-                    (((parseInt(shares, 10) || 0) * Math.max(0, parsedEntry - parsedStop)) /
-                      accountSize) *
-                    100
-                  ).toFixed(2)}
-                  % of sleeve)
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Row 5: 4-Tier Target Ladder Inputs */}
+          {/* Row 2: Entry Price & Stop Loss */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-mono uppercase text-emerald-400 mb-1">
-                Target 1 (Scale 50% &amp; Move Stop to B/E) ($)
+                {status === "CLOSED" ? "Actual Entry Price ($) *" : "Entry Price ($) *"}
               </label>
-              <input
-                type="number"
-                step="0.01"
-                placeholder="48.00"
-                value={target1}
-                onChange={(e) => setTarget1(e.target.value)}
-                className="w-full rounded-xl border border-emerald-500/30 bg-black/50 px-3.5 py-2.5 font-mono text-sm text-emerald-300 focus:outline-none focus:border-emerald-500"
-              />
+              <div className="relative">
+                <span className="absolute left-3.5 top-2 text-neutral-500">$</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  placeholder="100.00"
+                  value={entryPrice}
+                  onChange={(e) => setEntryPrice(e.target.value)}
+                  required
+                  className="w-full rounded-xl border border-emerald-500/30 bg-black/50 pl-8 pr-3.5 py-2 font-mono text-sm text-white focus:outline-none focus:border-emerald-500"
+                />
+              </div>
             </div>
 
             <div>
-              <label className="block text-xs font-mono uppercase text-purple-400 mb-1">
-                Target 2 (Runner Extension / +3.5R) ($)
+              <label className="block text-xs font-mono uppercase text-rose-400 mb-1">
+                Hard Stop Loss ($) *
               </label>
-              <input
-                type="number"
-                step="0.01"
-                placeholder="52.00"
-                value={target2}
-                onChange={(e) => setTarget2(e.target.value)}
-                className="w-full rounded-xl border border-purple-500/30 bg-black/50 px-3.5 py-2.5 font-mono text-sm text-purple-300 focus:outline-none focus:border-purple-500"
-              />
+              <div className="relative">
+                <span className="absolute left-3.5 top-2 text-rose-500">$</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  placeholder="95.00"
+                  value={stopLoss}
+                  onChange={(e) => setStopLoss(e.target.value)}
+                  required
+                  className="w-full rounded-xl border border-rose-500/30 bg-black/50 pl-8 pr-3.5 py-2 font-mono text-sm text-rose-300 focus:outline-none focus:border-rose-500"
+                />
+              </div>
             </div>
           </div>
 
-          {/* Embedded Visual 4-Tier Price Ladder Preview */}
-          {parsedEntry > 0 && parsedStop > 0 && parsedStop < parsedEntry && (
-            <div className="pt-2">
-              <span className="text-[11px] font-mono uppercase text-neutral-400 block mb-1">
-                Execution Price Ladder Preview:
-              </span>
-              <PriceLadder
-                entryTrigger={parsedEntry}
-                stopLoss={parsedStop}
-                target1={parsedT1}
-                target2={parsedT2}
-                positionShares={parseInt(shares, 10) || 0}
-                accountSize={accountSize}
-                variant="full"
-                showSizingBar={true}
+          {/* Sizing & Shares Section */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-mono uppercase text-sky-400">
+                  Total Shares *
+                </label>
+                {sizingResult && status !== "CLOSED" && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsManualShares(false);
+                      setShares(sizingResult.shares.toString());
+                    }}
+                    className="text-[10px] font-mono text-emerald-400 underline"
+                  >
+                    1% Risk Auto: {sizingResult.shares} sh
+                  </button>
+                )}
+              </div>
+              <input
+                type="number"
+                placeholder="e.g. 50"
+                value={shares}
+                onChange={(e) => {
+                  setIsManualShares(true);
+                  setShares(e.target.value);
+                }}
+                required
+                className="w-full rounded-xl border border-white/10 bg-black/50 px-3.5 py-2 font-mono text-sm text-white focus:outline-none focus:border-sky-500"
               />
+            </div>
+
+            {/* Target 1 */}
+            <div>
+              <label className="block text-xs font-mono uppercase text-neutral-400 mb-1">
+                Target 1 ($) (2:1 R:R Scale)
+              </label>
+              <div className="relative">
+                <span className="absolute left-3.5 top-2 text-neutral-500">$</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  placeholder="110.00"
+                  value={target1}
+                  onChange={(e) => setTarget1(e.target.value)}
+                  className="w-full rounded-xl border border-white/10 bg-black/50 pl-8 pr-3.5 py-2 font-mono text-sm text-neutral-200 focus:outline-none focus:border-sky-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* IF CLOSED: Exit Details (Date, Price, Reason, Realized P&L) */}
+          {status === "CLOSED" && (
+            <div className="rounded-2xl border border-purple-500/30 bg-purple-500/[0.04] p-4 space-y-4">
+              <div className="flex items-center space-x-2 text-purple-300 text-xs font-mono font-bold uppercase">
+                <History className="h-4 w-4" />
+                <span>Historical Campaign Exit Details</span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-[11px] font-mono text-neutral-400 mb-1">
+                    Entry Date
+                  </label>
+                  <input
+                    type="date"
+                    value={entryDate}
+                    onChange={(e) => setEntryDate(e.target.value)}
+                    className="w-full rounded-xl border border-white/10 bg-black/50 px-3 py-1.5 font-mono text-xs text-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-mono text-neutral-400 mb-1">
+                    Exit / Sold Date *
+                  </label>
+                  <input
+                    type="date"
+                    value={exitDate}
+                    onChange={(e) => setExitDate(e.target.value)}
+                    required
+                    className="w-full rounded-xl border border-white/10 bg-black/50 px-3 py-1.5 font-mono text-xs text-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-mono text-rose-400 mb-1">
+                    Exit / Sold Price ($) *
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1.5 text-neutral-500">$</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      placeholder="94.50"
+                      value={exitPrice}
+                      onChange={(e) => setExitPrice(e.target.value)}
+                      required
+                      className="w-full rounded-xl border border-purple-500/30 bg-black/50 pl-7 pr-3 py-1.5 font-mono text-xs text-white"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                <div>
+                  <label className="block text-[11px] font-mono text-neutral-400 mb-1">
+                    Exit Reason
+                  </label>
+                  <select
+                    value={exitReason}
+                    onChange={(e) => setExitReason(e.target.value)}
+                    className="w-full rounded-xl border border-white/10 bg-black/50 px-3 py-2 text-xs text-white font-mono"
+                  >
+                    <option value="STOP_LOSS_EXECUTED">Stop Loss Hit (Stopped Out)</option>
+                    <option value="TARGET_1_HIT">Target 1 Reached (Scaled 50%)</option>
+                    <option value="TARGET_2_HIT">Target 2 Reached (Full Profit)</option>
+                    <option value="TIME_STOP_EXIT">Time Stop Exit (Momentum Stalled)</option>
+                    <option value="MANUAL_EXIT">Manual Discretionary Exit</option>
+                  </select>
+                </div>
+
+                {/* Realized P&L Summary Box */}
+                <div className="rounded-xl border border-white/10 bg-black/40 p-2.5 flex items-center justify-between font-mono text-xs">
+                  <div>
+                    <span className="text-neutral-400 block text-[10px] uppercase">Realized P&amp;L</span>
+                    <span className={`text-base font-bold ${calculatedRealizedPnL >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                      {calculatedRealizedPnL >= 0 ? "+" : ""}${calculatedRealizedPnL.toFixed(2)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-neutral-400 block text-[10px] uppercase">R-Multiple</span>
+                    <span className={`text-base font-bold ${calculatedRMultiple >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                      {calculatedRMultiple >= 0 ? "+" : ""}{calculatedRMultiple.toFixed(2)}R
+                    </span>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
-          {/* Row 6: Thesis & Catalyst Notes */}
+          {/* Notes / Thesis */}
           <div>
             <label className="block text-xs font-mono uppercase text-neutral-400 mb-1">
-              Catalyst / Trade Thesis (Optional)
+              Catalyst Notes / Trade Post-Mortem
             </label>
-            <input
-              type="text"
-              placeholder="e.g. Q2 Earnings beat + guidance raise. Breakout above 50-DMA on 2x volume."
+            <textarea
+              rows={2}
+              placeholder="e.g. Stopped out on post-earnings consolidation chop. Honor risk rule."
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               className="w-full rounded-xl border border-white/10 bg-black/50 px-3.5 py-2 text-xs text-neutral-200 focus:outline-none focus:border-sky-500"
             />
           </div>
 
-          {error && <p className="text-xs text-rose-400 font-mono">{error}</p>}
+          {/* Submit Action */}
+          <div className="flex items-center justify-end space-x-3 pt-3 border-t border-white/[0.06]">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-full px-4 py-2 text-xs font-medium text-neutral-400 hover:text-white transition"
+            >
+              Cancel
+            </button>
 
-          {/* Submit Button */}
-          <button
-            type="submit"
-            disabled={loading || (guardrailCheck ? !guardrailCheck.isAllowed : false)}
-            className="w-full flex items-center justify-center space-x-2 rounded-2xl bg-white py-3.5 text-sm font-semibold text-neutral-900 shadow hover:bg-neutral-100 transition active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <PlusCircle className="h-4 w-4 text-emerald-600" />
-            <span>
-              {status === "ACTIVE" ? "Log Active Position (<15s)" : "Stage Pending Watch Order"}
-            </span>
-          </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className={`flex items-center space-x-2 rounded-full px-6 py-2.5 text-xs font-semibold text-white shadow-lg transition active:scale-95 disabled:opacity-50 ${
+                status === "CLOSED"
+                  ? "bg-purple-500 hover:bg-purple-400 shadow-purple-500/20"
+                  : "bg-emerald-500 hover:bg-emerald-400 shadow-emerald-500/20"
+              }`}
+            >
+              {loading ? (
+                <span>Logging...</span>
+              ) : (
+                <>
+                  <CheckCircle2 className="h-4 w-4" />
+                  <span>{status === "CLOSED" ? "Log Closed Move into History" : "Save Active Position"}</span>
+                </>
+              )}
+            </button>
+          </div>
         </form>
       </div>
     </div>
   );
 };
-
-export default QuickEntryModal;

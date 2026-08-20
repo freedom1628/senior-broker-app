@@ -17,6 +17,8 @@ import {
   Lock,
   Volume2,
   VolumeX,
+  HelpCircle,
+  GraduationCap,
 } from "lucide-react";
 import { isMuted, setMuted } from "@/lib/audio/sound-effects";
 
@@ -27,6 +29,7 @@ interface HeaderProps {
   onOpenNotifications: () => void;
   onSignOut: () => void;
   onLockDesk?: () => void;
+  onOpenTour?: () => void;
   unreadAlertsCount: number;
   marketQuotes: Record<string, any>;
   onRefreshQuotes: () => void;
@@ -36,6 +39,7 @@ interface HeaderProps {
   currentUser?: { email: string; name: string } | null;
   activeTab?: any;
   onNavigateTab?: (tab: any) => void;
+  activeTrades?: any[];
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -45,6 +49,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenNotifications,
   onSignOut,
   onLockDesk,
+  onOpenTour,
   unreadAlertsCount,
   marketQuotes,
   onRefreshQuotes,
@@ -52,6 +57,7 @@ export const Header: React.FC<HeaderProps> = ({
   accountSize,
   riskPerTrade,
   currentUser,
+  activeTrades = [],
 }) => {
   const spy = marketQuotes["SPY"];
   const qqq = marketQuotes["QQQ"];
@@ -102,10 +108,12 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* Center: Live Index Ribbon */}
-        <div className="hidden xl:flex items-center space-x-2 rounded-full border border-white/[0.08] bg-white/[0.03] px-3.5 py-1.5 backdrop-blur-md">
+        {/* Center: Live Running Ticker (Indices + User Positions) */}
+        <div className="hidden lg:flex items-center space-x-2 rounded-full border border-white/[0.08] bg-white/[0.03] px-3.5 py-1.5 backdrop-blur-md max-w-xl overflow-x-auto no-scrollbar">
+          
+          {/* Major Indices */}
           {spy && (
-            <div className="flex items-center space-x-1.5 px-2 text-xs">
+            <div className="flex items-center space-x-1.5 px-2 text-xs shrink-0">
               <span className="font-mono font-medium text-neutral-400">SPY</span>
               <span className="font-mono font-semibold text-white">${spy.price.toFixed(2)}</span>
               <span className={`font-mono text-[11px] ${spy.change >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
@@ -113,9 +121,9 @@ export const Header: React.FC<HeaderProps> = ({
               </span>
             </div>
           )}
-          <div className="h-3 w-px bg-white/10" />
+          <div className="h-3 w-px bg-white/10 shrink-0" />
           {qqq && (
-            <div className="flex items-center space-x-1.5 px-2 text-xs">
+            <div className="flex items-center space-x-1.5 px-2 text-xs shrink-0">
               <span className="font-mono font-medium text-neutral-400">QQQ</span>
               <span className="font-mono font-semibold text-white">${qqq.price.toFixed(2)}</span>
               <span className={`font-mono text-[11px] ${qqq.change >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
@@ -123,13 +131,38 @@ export const Header: React.FC<HeaderProps> = ({
               </span>
             </div>
           )}
-          <div className="h-3 w-px bg-white/10" />
+          <div className="h-3 w-px bg-white/10 shrink-0" />
           {vix && (
-            <div className="flex items-center space-x-1.5 px-2 text-xs">
+            <div className="flex items-center space-x-1.5 px-2 text-xs shrink-0">
               <span className="font-mono font-medium text-neutral-400">VIX</span>
               <span className="font-mono font-semibold text-sky-400">{vix.price.toFixed(2)}</span>
             </div>
           )}
+
+          {/* User's Active Position Tickers */}
+          {activeTrades.map((trade) => {
+            const sym = trade.ticker.toUpperCase();
+            const quote = marketQuotes[sym];
+            const price = quote?.price || trade.entryTrigger;
+            const change = quote?.change ?? 0;
+            const changePct = quote?.changePct ?? 0;
+            const isNasdaq = ["AAPL", "NVDA", "MSFT", "AMZN", "GOOGL", "META", "TSLA", "GLBE", "TWLO", "LITE", "CRWV"].includes(sym);
+            const indexLabel = isNasdaq ? "QQQ" : "SPY";
+
+            return (
+              <React.Fragment key={trade.id || sym}>
+                <div className="h-3 w-px bg-white/10 shrink-0" />
+                <div className="flex items-center space-x-1.5 px-2 text-xs shrink-0">
+                  <span className="font-mono font-bold text-sky-300">{sym}</span>
+                  <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-white/10 text-neutral-400">{indexLabel}</span>
+                  <span className="font-mono font-semibold text-white">${price.toFixed(2)}</span>
+                  <span className={`font-mono text-[11px] ${change >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                    {change >= 0 ? "+" : ""}{changePct.toFixed(2)}%
+                  </span>
+                </div>
+              </React.Fragment>
+            );
+          })}
         </div>
 
         {/* Right: Actions */}
@@ -154,6 +187,18 @@ export const Header: React.FC<HeaderProps> = ({
             <Sparkles className="h-3.5 w-3.5 text-sky-600" />
             <span>AI Research</span>
           </button>
+
+          {/* Interactive Walkthrough / Tour Button */}
+          {onOpenTour && (
+            <button
+              type="button"
+              onClick={onOpenTour}
+              title="How to Use App (Apple-style Walkthrough)"
+              className="flex h-9 w-9 items-center justify-center rounded-full border border-sky-500/20 bg-sky-500/10 text-sky-300 hover:bg-sky-500/20 transition active:scale-95"
+            >
+              <HelpCircle className="h-4 w-4" />
+            </button>
+          )}
 
           {/* Sound Toggle (Mute / Unmute) */}
           <button
@@ -204,18 +249,6 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <Sliders className="h-4 w-4" />
           </button>
-
-          {/* Quick Lock Desk Trigger (if provided) */}
-          {onLockDesk && (
-            <button
-              type="button"
-              onClick={onLockDesk}
-              title="Lock Trading Desk"
-              className="flex h-9 w-9 items-center justify-center rounded-full border border-amber-500/20 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 transition active:scale-95"
-            >
-              <Lock className="h-4 w-4" />
-            </button>
-          )}
 
           {/* Sign Out */}
           <button

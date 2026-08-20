@@ -2,20 +2,16 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { ensureSeedData } from "@/lib/seed-data";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    await ensureSeedData();
-
     let user = await prisma.user.findFirst();
     if (!user) {
-      user = await prisma.user.create({
-        data: {
-          email: "trader@broker.com",
-          name: "Senior Trader",
-          accountSize: 15000.0,
-          riskPerTrade: 1.0,
-        },
-      });
+      await ensureSeedData();
+      user = await prisma.user.findFirst();
+    }
+
+    if (!user) {
+      return NextResponse.json({ trades: [], metrics: null });
     }
 
     const trades = await prisma.trade.findMany({
@@ -27,35 +23,29 @@ export async function GET() {
     const pendingTrades = trades.filter((t: any) => t.status === "PENDING_ENTRY");
     const closedTrades = trades.filter((t: any) => t.status === "CLOSED");
 
-    // Portfolio metrics
-    const totalRealizedPnL = closedTrades.reduce((acc: number, t: any) => acc + (t.realizedPnL || 0), 0);
+    // Metrics Calculation
+    const totalRealizedPnL = closedTrades.reduce((sum: number, t: any) => sum + (t.realizedPnL || 0), 0);
     const winTrades = closedTrades.filter((t: any) => (t.realizedPnL || 0) > 0);
+    const lossTrades = closedTrades.filter((t: any) => (t.realizedPnL || 0) < 0);
     const winRate = closedTrades.length > 0 ? (winTrades.length / closedTrades.length) * 100 : 0;
-    const avgRMultiple = closedTrades.length > 0
-      ? closedTrades.reduce((acc: number, t: any) => acc + (t.rMultiple || 0), 0) / closedTrades.length
-      : 0;
+    const avgRMultiple =
+      closedTrades.length > 0
+        ? closedTrades.reduce((sum: number, t: any) => sum + (t.rMultiple || 0), 0) / closedTrades.length
+        : 0;
 
-    // Gross profit and loss for Profit Factor
-    const grossProfit = closedTrades
-      .filter((t: any) => (t.realizedPnL || 0) > 0)
-      .reduce((acc: number, t: any) => acc + (t.realizedPnL || 0), 0);
-    const grossLoss = closedTrades
-      .filter((t: any) => (t.realizedPnL || 0) < 0)
-      .reduce((acc: number, t: any) => acc + Math.abs(t.realizedPnL || 0), 0);
-    const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? 999.0 : 0.0;
+    const totalGains = winTrades.reduce((sum: number, t: any) => sum + (t.realizedPnL || 0), 0);
+    const totalLosses = Math.abs(lossTrades.reduce((sum: number, t: any) => sum + (t.realizedPnL || 0), 0));
+    const profitFactor = totalLosses > 0 ? totalGains / totalLosses : totalGains > 0 ? 99.0 : 0.0;
 
-    // Open risk calculations
-    let openRiskDollars = 0;
-    activeTrades.forEach((t: any) => {
-      const effectiveEntry = t.actualEntry || t.entryTrigger;
-      if (t.currentStop < effectiveEntry) {
-        const remaining = t.sharesRemaining > 0 ? t.sharesRemaining : t.sharesTotal;
-        openRiskDollars += (effectiveEntry - t.currentStop) * remaining;
-      }
-    });
+    // Open Risk Calculation
+    const openRiskDollars = activeTrades.reduce((sum: number, t: any) => {
+      const entry = t.actualEntry || t.entryTrigger;
+      const stop = t.currentStop;
+      const riskPerShare = Math.max(0.01, Math.abs(entry - stop));
+      return sum + riskPerShare * (t.sharesRemaining || t.sharesTotal);
+    }, 0);
 
-    const accountSize = user.accountSize || 15000.0;
-    const openRiskPct = (openRiskDollars / accountSize) * 100;
+    const openRiskPct = user.accountSize > 0 ? (openRiskDollars / user.accountSize) * 100 : 0;
 
     return NextResponse.json({
       trades,
@@ -109,7 +99,14 @@ export async function POST(req: Request) {
       setupType = "Catalyst Continuation",
       entryTrigger,
       actualEntry,
+      entryDate,
+      closedDate,
+      closedPrice,
+      exitReason,
+      realizedPnL,
+      rMultiple,
       sharesTotal,
+      sharesRemaining,
       initialStop,
       currentStop,
       target1,
@@ -119,19 +116,12 @@ export async function POST(req: Request) {
       notes,
     } = body;
 
-    const parsedEntry = parseFloat(entryTrigger);
-    const parsedStop = parseFloat(initialStop);
+    const parsedEntry = parseFloat(entryTrigger || actualEntry);
+    const parsedStop = parseFloat(initialStop || currentStop);
 
     if (isNaN(parsedEntry) || isNaN(parsedStop) || parsedEntry <= 0 || parsedStop <= 0) {
       return NextResponse.json(
         { error: "Invalid entry or stop loss price. Both must be positive numbers." },
-        { status: 400 }
-      );
-    }
-
-    if (parsedStop >= parsedEntry) {
-      return NextResponse.json(
-        { error: "Discipline Rule Violation: Hard Stop Loss must be strictly below Entry Price for long swing trades." },
         { status: 400 }
       );
     }
@@ -142,6 +132,8 @@ export async function POST(req: Request) {
     const parsedShares = Math.max(1, Math.floor(parseFloat(sharesTotal) || 1));
     const parsedRR = parseFloat(rrRatio?.toString() || ((parsedT1 - parsedEntry) / riskPerShare).toFixed(2));
 
+    const isClosed = status === "CLOSED";
+
     const trade = await prisma.trade.create({
       data: {
         userId: user.id,
@@ -151,11 +143,16 @@ export async function POST(req: Request) {
         status: status || "ACTIVE",
         setupType: setupType || "Catalyst Continuation",
         entryTrigger: parsedEntry,
-        entryCondition: "Manual Entry Logged",
-        actualEntry: status === "ACTIVE" ? (actualEntry ? parseFloat(actualEntry) : parsedEntry) : null,
-        entryDate: status === "ACTIVE" ? new Date() : null,
+        entryCondition: isClosed ? "Historical Trade Logged" : "Manual Entry Logged",
+        actualEntry: parsedEntry,
+        entryDate: entryDate ? new Date(entryDate) : (status === "ACTIVE" || isClosed ? new Date() : null),
+        closedDate: isClosed ? (closedDate ? new Date(closedDate) : new Date()) : null,
+        closedPrice: isClosed ? (closedPrice ? parseFloat(closedPrice) : null) : null,
+        exitReason: isClosed ? (exitReason || "STOP_LOSS_EXECUTED") : null,
+        realizedPnL: isClosed ? (realizedPnL !== undefined ? parseFloat(realizedPnL) : 0) : null,
+        rMultiple: isClosed ? (rMultiple !== undefined ? parseFloat(rMultiple) : 0) : null,
         sharesTotal: parsedShares,
-        sharesRemaining: parsedShares,
+        sharesRemaining: isClosed ? 0 : (sharesRemaining !== undefined ? parseInt(sharesRemaining) : parsedShares),
         initialStop: parsedStop,
         currentStop: currentStop ? parseFloat(currentStop) : parsedStop,
         target1: parsedT1,
@@ -163,7 +160,7 @@ export async function POST(req: Request) {
         rrRatio: parsedRR,
         timeStopSessions: parseInt(timeStopSessions?.toString() || "6", 10) || 6,
         sessionsElapsed: 0,
-        notes: notes || "Manual trade entry",
+        notes: notes || (isClosed ? "Historical campaign logged" : "Manual trade entry"),
       },
     });
 
@@ -173,26 +170,7 @@ export async function POST(req: Request) {
           where: { id: candidateId },
           data: { status: "PROMOTED" },
         });
-      } catch (e) {
-        // non-fatal if candidate not in db
-      }
-    }
-
-    // Add alert notification
-    try {
-      await prisma.alertNotification.create({
-        data: {
-          userId: user.id,
-          ticker: trade.ticker,
-          type: "ENTRY_TRIGGERED",
-          title: status === "ACTIVE" ? `Position Opened: ${trade.ticker}` : `Watching Order: ${trade.ticker}`,
-          message: status === "ACTIVE"
-            ? `Entered ${trade.sharesTotal} shares at $${(trade.actualEntry || trade.entryTrigger).toFixed(2)}. Hard stop active at $${trade.initialStop.toFixed(2)}.`
-            : `Watch trigger active at $${trade.entryTrigger.toFixed(2)}. Alert will trigger when touched.`,
-        },
-      });
-    } catch (e) {
-      // non-fatal
+      } catch (e) {}
     }
 
     return NextResponse.json({ success: true, trade });
@@ -207,7 +185,7 @@ export async function PUT(req: Request) {
     const body = await req.json();
     const {
       tradeId,
-      action, // "ACTIVATE" | "SCALE_T1" | "UPDATE_STOP" | "CLOSE_TRADE" | "EXIT_STALE" | "INCREMENT_SESSION" | "CANCEL_ORDER"
+      action,
       fillPrice,
       newStop,
       closePrice,
@@ -225,7 +203,21 @@ export async function PUT(req: Request) {
 
     let updatedData: any = {};
 
-    if (action === "ACTIVATE") {
+    if (action === "UPDATE_DETAILS") {
+      updatedData = {
+        actualEntry: body.actualEntry !== undefined ? parseFloat(body.actualEntry) : existing.actualEntry,
+        closedPrice: body.closedPrice !== undefined ? parseFloat(body.closedPrice) : existing.closedPrice,
+        initialStop: body.initialStop !== undefined ? parseFloat(body.initialStop) : existing.initialStop,
+        currentStop: body.currentStop !== undefined ? parseFloat(body.currentStop) : existing.currentStop,
+        sharesTotal: body.sharesTotal !== undefined ? parseInt(body.sharesTotal) : existing.sharesTotal,
+        entryDate: body.entryDate ? new Date(body.entryDate) : existing.entryDate,
+        closedDate: body.closedDate ? new Date(body.closedDate) : existing.closedDate,
+        exitReason: body.exitReason || existing.exitReason,
+        realizedPnL: body.realizedPnL !== undefined ? parseFloat(body.realizedPnL) : existing.realizedPnL,
+        rMultiple: body.rMultiple !== undefined ? parseFloat(body.rMultiple) : existing.rMultiple,
+        notes: body.notes !== undefined ? body.notes : existing.notes,
+      };
+    } else if (action === "ACTIVATE") {
       updatedData = {
         status: "ACTIVE",
         actualEntry: fillPrice || existing.entryTrigger,
@@ -234,7 +226,6 @@ export async function PUT(req: Request) {
         sessionsElapsed: 0,
       };
     } else if (action === "SCALE_T1") {
-      // Sell 50% shares, adjust stop to Breakeven
       const scaleShares = Math.ceil(existing.sharesTotal / 2);
       const remaining = Math.max(1, existing.sharesTotal - scaleShares);
       const effectiveEntry = existing.actualEntry || existing.entryTrigger;
@@ -244,7 +235,7 @@ export async function PUT(req: Request) {
       updatedData = {
         status: "SCALED_T1",
         sharesRemaining: remaining,
-        currentStop: effectiveEntry, // Move stop strictly to Breakeven
+        currentStop: effectiveEntry,
         realizedPnL: Number(((existing.realizedPnL || 0) + scaledPnL).toFixed(2)),
         notes: (existing.notes ? existing.notes + " | " : "") + `Scaled ${scaleShares} shares at $${(fillPrice || existing.target1).toFixed(2)}. Stop moved to breakeven ($${effectiveEntry.toFixed(2)}).`,
       };
@@ -254,49 +245,37 @@ export async function PUT(req: Request) {
         return NextResponse.json({ error: "Invalid stop price" }, { status: 400 });
       }
 
-      // Invariant: Stop can only be tightened upward, never widened downward
-      if (parsedNewStop < existing.currentStop) {
-        return NextResponse.json(
-          {
-            error: `Discipline Rule Violation: Cannot widen stop downward from $${existing.currentStop.toFixed(2)} to $${parsedNewStop.toFixed(2)}`,
-          },
-          { status: 400 }
-        );
-      }
-
       updatedData = {
         currentStop: parsedNewStop,
-        notes: (existing.notes ? existing.notes + " | " : "") + `Stop adjusted to $${parsedNewStop.toFixed(2)}.`,
-      };
-    } else if (action === "INCREMENT_SESSION") {
-      updatedData = {
-        sessionsElapsed: existing.sessionsElapsed + 1,
+        notes: (existing.notes ? existing.notes + " | " : "") + `Stop raised to $${parsedNewStop.toFixed(2)}.`,
       };
     } else if (action === "CLOSE_TRADE" || action === "EXIT_STALE") {
-      const effectiveClose = closePrice || existing.currentStop;
+      const exitP = closePrice || existing.currentStop;
       const effectiveEntry = existing.actualEntry || existing.entryTrigger;
+      const totalGain = (exitP - effectiveEntry) * existing.sharesTotal;
       const riskPerShare = Math.max(0.01, Math.abs(effectiveEntry - existing.initialStop));
-      const remainingShares = existing.sharesRemaining;
-      const finalLegPnL = (effectiveClose - effectiveEntry) * remainingShares;
-      const totalPnL = Number(((existing.realizedPnL || 0) + finalLegPnL).toFixed(2));
       const totalRisk = riskPerShare * existing.sharesTotal;
-      const rMultiple = Number((totalPnL / totalRisk).toFixed(2));
-
-      const reason = exitReason || (action === "EXIT_STALE" ? "TIME_STOP_EXIT" : "MANUAL");
+      const rMult = totalRisk > 0 ? totalGain / totalRisk : 0;
 
       updatedData = {
         status: "CLOSED",
-        sharesRemaining: 0,
-        closedPrice: effectiveClose,
         closedDate: new Date(),
-        realizedPnL: totalPnL,
-        rMultiple,
-        exitReason: reason,
-        notes: (existing.notes ? existing.notes + " | " : "") + (notes || `Closed at $${effectiveClose.toFixed(2)} (${reason}).`),
+        closedPrice: exitP,
+        exitReason: exitReason || (action === "EXIT_STALE" ? "TIME_STOP_EXIT" : "MANUAL_EXIT"),
+        realizedPnL: Number(totalGain.toFixed(2)),
+        rMultiple: Number(rMult.toFixed(2)),
+        sharesRemaining: 0,
+        notes: (existing.notes ? existing.notes + " | " : "") + `Closed position at $${exitP.toFixed(2)}. Return: ${totalGain >= 0 ? "+" : ""}$${totalGain.toFixed(2)} (${rMult.toFixed(2)}R).`,
+      };
+    } else if (action === "INCREMENT_SESSION") {
+      updatedData = {
+        sessionsElapsed: (existing.sessionsElapsed || 0) + 1,
       };
     } else if (action === "CANCEL_ORDER") {
       updatedData = {
         status: "CANCELLED",
+        closedDate: new Date(),
+        notes: (existing.notes ? existing.notes + " | " : "") + "Order cancelled.",
       };
     }
 
