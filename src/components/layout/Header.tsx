@@ -5,6 +5,7 @@ import {
   Activity,
   Bell,
   Sliders,
+  Settings as SettingsIcon,
   Plus,
   TrendingUp,
   RefreshCw,
@@ -244,10 +245,10 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             type="button"
             onClick={onOpenSettings}
-            title="Settings & Capital"
+            title="Settings & Diagnostics"
             className="flex h-9 w-9 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.04] text-neutral-300 hover:bg-white/[0.08] transition active:scale-95"
           >
-            <Sliders className="h-4 w-4" />
+            <SettingsIcon className="h-4 w-4" />
           </button>
 
           {/* Sign Out */}

@@ -20,7 +20,12 @@ import { OnboardingTourModal } from "@/components/dashboard/OnboardingTourModal"
 import { SignInView } from "@/components/auth/SignInView";
 import { DeskLockOverlay } from "@/components/auth/DeskLockOverlay";
 import { triggerNotificationAlert } from "@/lib/notifications/notification-service";
-import { initDiagnosticLogger } from "@/lib/diagnostics/log-collector";
+import {
+  initDiagnosticLogger,
+  generateApplicationDiagnosticDump,
+  getDiagnosticLogs,
+  clearDiagnosticLogs,
+} from "@/lib/diagnostics/log-collector";
 import {
   syncProfileTradesWithServer,
   loadProfileTradesFromStorage,
@@ -32,6 +37,7 @@ import {
 import { NavigationTab } from "@/types";
 import {
   Sliders,
+  Settings as SettingsIcon,
   Shield,
   Key,
   DollarSign,
@@ -39,6 +45,16 @@ import {
   CheckCircle2,
   Lock,
   Smartphone,
+  Terminal,
+  Copy,
+  Download,
+  FileText,
+  RefreshCw,
+  Trash2,
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  Check,
 } from "lucide-react";
 
 function DeskHome() {
@@ -76,6 +92,11 @@ function DeskHome() {
   const [isAddTradeOpen, setIsAddTradeOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isTourOpen, setIsTourOpen] = useState(false);
+
+  // In-page diagnostics state
+  const [pageDiagCopied, setPageDiagCopied] = useState(false);
+  const [showPageDiagTerminal, setShowPageDiagTerminal] = useState(false);
+  const [pageDiagLogs, setPageDiagLogs] = useState<any[]>([]);
 
   // Check tour completion and initialize diagnostic logger on first mount
   useEffect(() => {
@@ -652,6 +673,136 @@ function DeskHome() {
                     </div>
                   </form>
                 </div>
+              </div>
+
+              {/* 3. Diagnostic & Troubleshooting Log Dump Panel */}
+              <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/[0.03] p-5 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.06] pb-3">
+                  <div className="flex items-center space-x-2 text-cyan-400 text-xs font-mono font-bold uppercase">
+                    <Terminal className="h-4 w-4" />
+                    <span>Troubleshooting &amp; Application Log Dump</span>
+                  </div>
+                  <span className="text-[10px] text-neutral-400 font-mono">
+                    1-Click bug reporting &amp; state audit
+                  </span>
+                </div>
+
+                <p className="text-xs text-neutral-300 font-sans leading-relaxed">
+                  Export complete application diagnostics including active user session, storage vault size, sync events, and recent console errors to paste directly into chat when reporting issues.
+                </p>
+
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const dump = generateApplicationDiagnosticDump();
+                      navigator.clipboard.writeText(dump);
+                      setPageDiagCopied(true);
+                      setTimeout(() => setPageDiagCopied(false), 2000);
+                    }}
+                    className="flex items-center space-x-1.5 rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-4 py-2 text-xs font-mono font-bold text-cyan-300 hover:bg-cyan-500/20 transition active:scale-95 shadow-sm"
+                  >
+                    {pageDiagCopied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+                    <span>{pageDiagCopied ? "Copied Diagnostic Dump!" : "Copy Complete Log Dump"}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const dump = generateApplicationDiagnosticDump();
+                      const blob = new Blob([dump], { type: "application/json" });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = `senior-broker-diagnostics-${new Date().toISOString().split("T")[0]}.json`;
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                      URL.revokeObjectURL(url);
+                    }}
+                    className="flex items-center space-x-1.5 rounded-xl border border-white/10 bg-white/[0.04] px-3.5 py-2 text-xs font-mono text-neutral-300 hover:bg-white/[0.08] transition active:scale-95"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    <span>Download JSON</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPageDiagLogs(getDiagnosticLogs());
+                      setShowPageDiagTerminal(!showPageDiagTerminal);
+                    }}
+                    className="flex items-center space-x-1.5 rounded-xl border border-white/10 bg-white/[0.04] px-3.5 py-2 text-xs font-mono text-neutral-300 hover:bg-white/[0.08] transition"
+                  >
+                    <FileText className="h-3.5 w-3.5" />
+                    <span>{showPageDiagTerminal ? "Hide Live Terminal" : "View Live Logs"}</span>
+                    {showPageDiagTerminal ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                  </button>
+                </div>
+
+                {/* Expandable Live Terminal */}
+                {showPageDiagTerminal && (
+                  <div className="rounded-2xl border border-white/10 bg-black/80 p-3.5 space-y-2 font-mono text-[11px] max-h-60 overflow-y-auto animate-in fade-in duration-150">
+                    <div className="flex items-center justify-between pb-1.5 border-b border-white/[0.06] text-neutral-400">
+                      <span className="text-[10px] uppercase font-bold text-cyan-400 flex items-center space-x-1.5">
+                        <Terminal className="h-3 w-3" />
+                        <span>Live Event Log Buffer ({pageDiagLogs.length} events)</span>
+                      </span>
+                      <div className="flex items-center space-x-2">
+                        <button
+                          type="button"
+                          onClick={() => setPageDiagLogs(getDiagnosticLogs())}
+                          className="hover:text-white transition flex items-center space-x-1 text-[10px]"
+                          title="Refresh"
+                        >
+                          <RefreshCw className="h-3 w-3" />
+                          <span>Refresh</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            clearDiagnosticLogs();
+                            setPageDiagLogs([]);
+                          }}
+                          className="hover:text-rose-400 transition text-[10px] flex items-center space-x-1"
+                          title="Clear Buffer"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          <span>Clear</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {pageDiagLogs.length === 0 ? (
+                      <div className="py-4 text-center text-neutral-600">No diagnostic events in buffer.</div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {pageDiagLogs.slice(0, 50).map((log) => (
+                          <div key={log.id} className="leading-tight">
+                            <span className="text-neutral-500 text-[10px] mr-1.5">
+                              {new Date(log.timestamp).toLocaleTimeString()}
+                            </span>
+                            <span
+                              className={`font-bold mr-1.5 px-1 py-0.2 rounded text-[9px] ${
+                                log.level === "ERROR"
+                                  ? "bg-rose-500/20 text-rose-300"
+                                  : log.level === "WARN"
+                                  ? "bg-amber-500/20 text-amber-300"
+                                  : log.level === "NETWORK"
+                                  ? "bg-purple-500/20 text-purple-300"
+                                  : "bg-sky-500/20 text-sky-300"
+                              }`}
+                            >
+                              {log.level}
+                            </span>
+                            <span className="text-neutral-400 text-[10px] mr-1.5">[{log.category}]</span>
+                            <span className="text-neutral-200">{log.message}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Trader Identity Card */}
