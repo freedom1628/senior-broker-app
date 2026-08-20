@@ -20,6 +20,7 @@ import { OnboardingTourModal } from "@/components/dashboard/OnboardingTourModal"
 import { SignInView } from "@/components/auth/SignInView";
 import { DeskLockOverlay } from "@/components/auth/DeskLockOverlay";
 import { triggerNotificationAlert } from "@/lib/notifications/notification-service";
+import { initDiagnosticLogger } from "@/lib/diagnostics/log-collector";
 import {
   syncProfileTradesWithServer,
   loadProfileTradesFromStorage,
@@ -76,8 +77,9 @@ function DeskHome() {
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isTourOpen, setIsTourOpen] = useState(false);
 
-  // Check tour completion on first mount
+  // Check tour completion and initialize diagnostic logger on first mount
   useEffect(() => {
+    initDiagnosticLogger();
     try {
       const tourDone = localStorage.getItem("senior_broker_tour_completed");
       if (!tourDone) {
