@@ -20,6 +20,14 @@ import { OnboardingTourModal } from "@/components/dashboard/OnboardingTourModal"
 import { SignInView } from "@/components/auth/SignInView";
 import { DeskLockOverlay } from "@/components/auth/DeskLockOverlay";
 import { triggerNotificationAlert } from "@/lib/notifications/notification-service";
+import {
+  syncProfileTradesWithServer,
+  loadProfileTradesFromStorage,
+  saveProfileTradesToStorage,
+  upsertProfileTrade,
+  removeProfileTrade,
+  clearAllProfileTrades,
+} from "@/lib/storage/profile-vault";
 import { NavigationTab } from "@/types";
 import {
   Sliders,
@@ -96,42 +104,24 @@ function DeskHome() {
     }
   }, []);
 
-  // 2. Fetch Trades Data (Merges Server & Local Storage Vault)
+  // 2. Fetch Trades Data (Profile Vault + Cloud Sync across App Updates)
   const loadTrades = useCallback(async () => {
     try {
-      const res = await fetch("/api/trades");
-      let serverTrades: any[] = [];
-      try {
-        const text = await res.text();
-        const data = text ? JSON.parse(text) : null;
-        if (data?.trades) serverTrades = data.trades;
-      } catch (e) {
-        serverTrades = [];
-      }
+      const email = currentUser?.email || "trader@broker.com";
+      const allTrades = await syncProfileTradesWithServer(email);
 
-      // Merge with locally persisted positions
-      const localTrades: any[] = JSON.parse(localStorage.getItem("senior_broker_custom_positions") || "[]");
-      const combinedMap = new Map<string, any>();
-      serverTrades.forEach((t) => combinedMap.set(t.ticker.toUpperCase(), t));
-      localTrades.forEach((t) => {
-        if (!combinedMap.has(t.ticker.toUpperCase())) {
-          combinedMap.set(t.ticker.toUpperCase(), t);
-        }
-      });
-
-      const allTrades = Array.from(combinedMap.values());
-      const active = allTrades.filter((t) => t.status === "ACTIVE" || t.status === "SCALED_T1");
-      const pending = allTrades.filter((t) => t.status === "PENDING_ENTRY");
-      const closed = allTrades.filter((t) => t.status === "CLOSED");
+      const active = allTrades.filter((t: any) => t.status === "ACTIVE" || t.status === "SCALED_T1");
+      const pending = allTrades.filter((t: any) => t.status === "PENDING_ENTRY");
+      const closed = allTrades.filter((t: any) => t.status === "CLOSED");
 
       setActiveTrades(active);
       setPendingTrades(pending);
       setClosedTrades(closed);
 
-      const totalRealized = closed.reduce((acc, t) => acc + (t.realizedPnL || 0), 0);
-      const winCount = closed.filter((t) => (t.realizedPnL || 0) > 0).length;
+      const totalRealized = closed.reduce((acc: number, t: any) => acc + (t.realizedPnL || 0), 0);
+      const winCount = closed.filter((t: any) => (t.realizedPnL || 0) > 0).length;
       const winRateVal = closed.length > 0 ? (winCount / closed.length) * 100 : 0;
-      const avgR = closed.length > 0 ? closed.reduce((acc, t) => acc + (t.rMultiple || 0), 0) / closed.length : 0;
+      const avgR = closed.length > 0 ? closed.reduce((acc: number, t: any) => acc + (t.rMultiple || 0), 0) / closed.length : 0;
 
       setMetrics({
         totalRealizedPnL: Number(totalRealized.toFixed(2)),
@@ -143,7 +133,7 @@ function DeskHome() {
     } catch (err) {
       console.error("Error loading trades:", err);
     }
-  }, []);
+  }, [currentUser]);
 
   // 3. Fetch Daily Moves Action Report
   const loadDailyReport = useCallback(async () => {
@@ -358,9 +348,7 @@ function DeskHome() {
   const handleDeleteTrade = async (tradeId: string) => {
     try {
       await fetch(`/api/trades?id=${tradeId}`, { method: "DELETE" });
-      const localTrades: any[] = JSON.parse(localStorage.getItem("senior_broker_custom_positions") || "[]");
-      const updated = localTrades.filter((t) => t.id !== tradeId);
-      localStorage.setItem("senior_broker_custom_positions", JSON.stringify(updated));
+      removeProfileTrade(tradeId, currentUser?.email);
       loadTrades();
       loadDailyReport();
     } catch (err) {
@@ -751,6 +739,7 @@ function DeskHome() {
           loadDailyReport();
         }}
         onResetAllData={() => {
+          clearAllProfileTrades(currentUser?.email);
           loadTrades();
           loadDailyReport();
         }}

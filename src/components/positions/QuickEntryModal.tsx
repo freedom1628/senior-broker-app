@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Trade } from "@/lib/storage/types";
 import { calculatePositionSize, SizingResult } from "@/lib/portfolio/sizing-calculator";
 import { validateProposedTrade, PortfolioRuleCheckResult } from "@/lib/market/rule-engine";
+import { upsertProfileTrade } from "@/lib/storage/profile-vault";
 import { PriceLadder } from "@/components/dashboard/PriceLadder";
 import { playEntryTriggered } from "@/lib/audio/sounds";
 import {
@@ -218,23 +219,31 @@ export const QuickEntryModal: React.FC<QuickEntryModalProps> = ({
       }
 
       // 1. Post to Server API
-      await fetch("/api/trades", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      // 2. Dual-Persist to Local Storage
+      let createdTrade: any = null;
       try {
-        const localTrades: any[] = JSON.parse(localStorage.getItem("senior_broker_custom_positions") || "[]");
-        const newTradeObj = {
+        const res = await fetch("/api/trades", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (data.trade) {
+          createdTrade = data.trade;
+        }
+      } catch (e) {
+        console.warn("Failed to post to server API:", e);
+      }
+
+      if (!createdTrade) {
+        createdTrade = {
           ...payload,
           id: `custom-trade-${Date.now()}`,
           createdAt: new Date().toISOString(),
         };
-        localTrades.push(newTradeObj);
-        localStorage.setItem("senior_broker_custom_positions", JSON.stringify(localTrades));
-      } catch (err) {}
+      }
+
+      // 2. Dual-Persist to Local Profile Vault
+      upsertProfileTrade(createdTrade);
 
       onTradeAdded();
       onClose();
