@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from "react";
 import { Trade } from "@/lib/storage/types";
+import { upsertProfileTrade } from "@/lib/storage/profile-vault";
 import { PriceLadder } from "@/components/dashboard/PriceLadder";
 import {
   X,
@@ -109,29 +110,21 @@ export const TradeDetailDrawer: React.FC<TradeDetailDrawerProps> = ({
       };
 
       // 1. Update on Server API
-      await fetch("/api/trades", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          tradeId: trade.id,
-          action: "UPDATE_DETAILS",
-          ...updatedPayload,
-        }),
-      });
-
-      // 2. Update in Local Storage Vault
       try {
-        const localTrades = JSON.parse(localStorage.getItem("senior_broker_custom_positions") || "[]");
-        const updated = localTrades.map((t: any) =>
-          t.id === trade.id
-            ? {
-                ...t,
-                ...updatedPayload,
-              }
-            : t
-        );
-        localStorage.setItem("senior_broker_custom_positions", JSON.stringify(updated));
+        await fetch("/api/trades", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            tradeId: trade.id,
+            action: "UPDATE_DETAILS",
+            ...updatedPayload,
+          }),
+        });
       } catch (e) {}
+
+      // 2. Update in Local Profile Vault
+      const fullUpdated = { ...trade, ...updatedPayload };
+      upsertProfileTrade(fullUpdated);
 
       if (onUpdateTrade) {
         onUpdateTrade({ ...trade, ...updatedPayload });
