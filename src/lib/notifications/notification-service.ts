@@ -10,6 +10,9 @@ export interface AppNotification {
   isRead: boolean;
 }
 
+// Memory debounce cache to prevent sound sirens or repeated audio loops
+const RECENT_AUDIO_ALERTS = new Map<string, number>();
+
 export function requestPushPermission() {
   if (typeof window !== "undefined" && "Notification" in window) {
     if (Notification.permission === "default") {
@@ -24,16 +27,31 @@ export function triggerNotificationAlert(notification: {
   title: string;
   message: string;
 }) {
-  // 1. Play synthesized Apple-style audio chime
-  if (notification.type === "TARGET_1_HIT" || notification.type === "TARGET_2_HIT") {
-    playTargetChime();
-  } else if (notification.type === "STOP_ALERT") {
-    playStopLossAlert();
-  } else {
-    playEntryTriggered();
+  const alertKey = `${notification.ticker}-${notification.type}`;
+  const now = Date.now();
+  const lastPlayed = RECENT_AUDIO_ALERTS.get(alertKey) || 0;
+
+  // Debounce audio: Never play the same audio alert more than once every 10 minutes
+  if (now - lastPlayed < 10 * 60 * 1000) {
+    return;
+  }
+  RECENT_AUDIO_ALERTS.set(alertKey, now);
+
+  // 1. Play soft, non-intrusive audio feedback
+  try {
+    if (notification.type === "TARGET_1_HIT" || notification.type === "TARGET_2_HIT") {
+      playTargetChime();
+    } else if (notification.type === "STOP_ALERT") {
+      // Soft gentle warning
+      playStopLossAlert();
+    } else {
+      playEntryTriggered();
+    }
+  } catch (e) {
+    // Non-fatal
   }
 
-  // 2. Trigger Web Push / Browser notification (works on Android Chrome, iOS Web App, and desktop)
+  // 2. Trigger Web Push / Browser notification
   if (typeof window !== "undefined" && "Notification" in window) {
     if (Notification.permission === "granted") {
       try {

@@ -1,35 +1,41 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import {
+  Activity,
   Bell,
   Sliders,
   Plus,
   TrendingUp,
   RefreshCw,
   Sparkles,
+  ShieldCheck,
+  Smartphone,
   LogOut,
+  User,
+  DollarSign,
   Lock,
-  User as UserIcon,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
-import { NavigationTab } from "@/types";
+import { isMuted, setMuted } from "@/lib/audio/sound-effects";
 
-export interface HeaderProps {
+interface HeaderProps {
   onOpenImport: () => void;
   onOpenSettings: () => void;
   onOpenAddTrade: () => void;
   onOpenNotifications: () => void;
   onSignOut: () => void;
+  onLockDesk?: () => void;
   unreadAlertsCount: number;
   marketQuotes: Record<string, any>;
   onRefreshQuotes: () => void;
   isPolling: boolean;
   accountSize: number;
   riskPerTrade: number;
-  currentUser?: { email: string; name: string; avatarUrl?: string } | null;
-  activeTab?: NavigationTab;
-  onNavigateTab?: (tab: NavigationTab) => void;
-  onLockDesk?: () => void;
+  currentUser?: { email: string; name: string } | null;
+  activeTab?: any;
+  onNavigateTab?: (tab: any) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -38,6 +44,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAddTrade,
   onOpenNotifications,
   onSignOut,
+  onLockDesk,
   unreadAlertsCount,
   marketQuotes,
   onRefreshQuotes,
@@ -45,11 +52,24 @@ export const Header: React.FC<HeaderProps> = ({
   accountSize,
   riskPerTrade,
   currentUser,
-  onLockDesk,
 }) => {
   const spy = marketQuotes["SPY"];
   const qqq = marketQuotes["QQQ"];
   const vix = marketQuotes["VIX"];
+
+  const [soundMuted, setSoundMuted] = useState(false);
+
+  useEffect(() => {
+    try {
+      setSoundMuted(isMuted());
+    } catch (e) {}
+  }, []);
+
+  const handleToggleSound = () => {
+    const nextState = !soundMuted;
+    setSoundMuted(nextState);
+    setMuted(nextState);
+  };
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-white/[0.08] bg-[#070A0F]/85 backdrop-blur-2xl transition-all">
@@ -133,6 +153,20 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <Sparkles className="h-3.5 w-3.5 text-sky-600" />
             <span>AI Research</span>
+          </button>
+
+          {/* Sound Toggle (Mute / Unmute) */}
+          <button
+            type="button"
+            onClick={handleToggleSound}
+            title={soundMuted ? "Sound is Muted (Click to Unmute)" : "Sound is Active (Click to Mute)"}
+            className={`flex h-9 w-9 items-center justify-center rounded-full border transition active:scale-95 ${
+              soundMuted
+                ? "border-neutral-700 bg-neutral-800/40 text-neutral-500"
+                : "border-sky-500/30 bg-sky-500/10 text-sky-400"
+            }`}
+          >
+            {soundMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
           </button>
 
           {/* Live Polling Status Indicator */}

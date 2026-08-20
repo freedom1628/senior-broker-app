@@ -11,7 +11,7 @@ export interface QuoteData {
   lastUpdated: string;
 }
 
-// In-memory quote cache with realistic live simulation for testing and real market quote capability
+// Stable, deterministic quote store with zero artificial jitter
 const QUOTE_CACHE: Record<string, QuoteData> = {
   ATRO: {
     ticker: "ATRO",
@@ -148,34 +148,26 @@ const QUOTE_CACHE: Record<string, QuoteData> = {
 };
 
 export async function getQuote(ticker: string): Promise<QuoteData> {
-  const sym = ticker.toUpperCase();
+  const sym = ticker.toUpperCase().trim();
   if (QUOTE_CACHE[sym]) {
-    // Add realistic micro-drift for dynamic UI testing
-    const base = QUOTE_CACHE[sym];
-    const jitter = (Math.random() - 0.5) * (base.price * 0.002);
-    const newPrice = Number((base.price + jitter).toFixed(2));
-    const newChange = Number((newPrice - base.prevClose).toFixed(2));
-    const newChangePct = Number(((newChange / base.prevClose) * 100).toFixed(2));
+    // Return stable, consistent quote without random jitter
     return {
-      ...base,
-      price: newPrice,
-      change: newChange,
-      changePct: newChangePct,
+      ...QUOTE_CACHE[sym],
       lastUpdated: new Date().toISOString(),
     };
   }
 
-  // Fallback for custom symbols
+  // Fallback for custom user symbols (stable)
   return {
     ticker: sym,
-    name: `${sym} Corporation`,
+    name: `${sym} Inc.`,
     price: 100.0,
-    change: 0.5,
-    changePct: 0.5,
-    high: 102.0,
-    low: 98.0,
-    volume: 1500000,
-    prevClose: 99.5,
+    change: 0.0,
+    changePct: 0.0,
+    high: 100.0,
+    low: 100.0,
+    volume: 1000000,
+    prevClose: 100.0,
     lastUpdated: new Date().toISOString(),
   };
 }
@@ -183,7 +175,7 @@ export async function getQuote(ticker: string): Promise<QuoteData> {
 export async function getMultipleQuotes(tickers: string[]): Promise<Record<string, QuoteData>> {
   const results: Record<string, QuoteData> = {};
   for (const t of tickers) {
-    results[t.toUpperCase()] = await getQuote(t);
+    results[t.toUpperCase().trim()] = await getQuote(t);
   }
   return results;
 }
